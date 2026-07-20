@@ -1,9 +1,31 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import axios from 'axios';
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { toast } from 'react-hot-toast';
+import { Eye, PackageSearch } from 'lucide-react';
+import { api, toastApiError } from '@/lib/api';
+import { formatINR, formatDate, formatDateTime, shortId } from '@/lib/format';
+import {
+  Card,
+  PageHeader,
+  Table,
+  THead,
+  TBody,
+  Th,
+  Tr,
+  Td,
+  Modal,
+  Select,
+  StatusBadge,
+  Spinner,
+  SkeletonTable,
+  EmptyState,
+  SearchInput,
+  Pagination,
+  Reveal,
+  Thumb,
+  IconButton,
+} from '@/components/ui';
 
 interface OrderItem {
   product: {
@@ -44,303 +66,425 @@ interface Order {
   createdAt: string;
 }
 
+/**
+ * The backend's `orderStatus` enum, verbatim — see genesis-Backend
+ * `src/models/Order.ts`. Unchanged from what this page already offered.
+ *
+ * `pending` is deliberately absent: it is a *payment* status, never an order
+ * status. The switch this file used to carry had a `pending` case, but the
+ * select never offered it and the schema does not allow it. That matters more
+ * than it looks — the admin update runs `findByIdAndUpdate` without
+ * `runValidators`, so Mongoose would NOT reject an out-of-enum value; it would
+ * persist silently. This list is the only thing keeping that honest.
+ */
+const ORDER_STATUSES = ['processing', 'shipped', 'delivered', 'cancelled'] as const;
+type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** Delivered and cancelled are done with — the storefront dims terminal records. */
+const TERMINAL_STATUSES: readonly string[] = ['delivered', 'cancelled'];
+
+const PAGE_SIZE = 20;
+
+/** Eyebrow-over-value: the system's smallest unit of labelled data. */
+function Detail({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <p className="eyebrow-tight text-faint mb-1.5">{label}</p>
+      <div className="font-sans text-[13px] text-ink leading-relaxed break-words">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** A titled block inside the detail modal, opened by a hairline. */
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="border-t border-line pt-5 first:border-t-0 first:pt-0">
+      <p className="eyebrow text-bronze-deep mb-4">{title}</p>
+      {children}
+    </section>
+  );
+}
+
 export default function OrdersPage() {
-  const router = useRouter();
-  const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
+  const [page, setPage] = useState(1);
 
-  const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
-
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const getAuthHeaders = () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('adminToken') : null;
-    return {
-      withCredentials: true,
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    };
+  // Narrowing the results can strand you past the last page, so both filter
+  // controls reset to page one. Done in the handlers rather than an effect —
+  // this is a consequence of the interaction, not state to synchronise.
+  const changeQuery = (value: string) => {
+    setQuery(value);
+    setPage(1);
+  };
+  const changeStatusFilter = (value: 'all' | OrderStatus) => {
+    setStatusFilter(value);
+    setPage(1);
   };
 
-  const handleAuthError = () => {
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminUser');
-    toast.error('Session expired. Please log in again.');
-    router.push('/admin-login');
-  };
-
-  const fetchOrders = async () => {
+  // Auth headers and 401/403 handling now live in the shared client's
+  // interceptors — clear session, toast, redirect — so this page no longer
+  // carries its own copy.
+  // No `setLoading(true)` here: it starts true, and setting it synchronously in
+  // the mount effect is what the React Compiler's set-state-in-effect rule
+  // (correctly) objects to. Everything below runs after the await.
+  const fetchOrders = useCallback(async () => {
     try {
-      setLoading(true);
-      const res = await axios.get(`${API_URL}/v1/payments/admin/orders`, getAuthHeaders());
+      const res = await api.get('/payments/admin/orders');
       if (res.data.success) {
         setOrders(res.data.data);
       }
-    } catch (err: any) {
-      console.error('Failed to fetch orders', err);
-      if (err.response?.status === 401) {
-        handleAuthError();
-      }
+    } catch (err) {
+      toastApiError(err, 'Could not load orders.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const activeOrder = orders.find(o => o._id === selectedOrder);
-
-  const getStatusStyle = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'delivered':
-        return 'bg-[#dcfce7] text-[#16a34a]';
-      case 'pending':
-        return 'bg-[#fef3c7] text-[#d97706]';
-      case 'processing':
-        return 'bg-[#e0e7ff] text-[#4f46e5]';
-      case 'shipped':
-        return 'bg-[#dbeafe] text-[#5b3db8]';
-      case 'cancelled':
-        return 'bg-[#fee2e2] text-[#dc2626]';
-      default:
-        return 'bg-slate-100 text-slate-600';
-    }
-  };
+  useEffect(() => {
+    // The compiler can't see that every setState here lands after an await;
+    // fetching on mount is the external-system sync effects are for.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchOrders();
+  }, [fetchOrders]);
 
   const handleStatusChange = async (id: string, newStatus: string) => {
     if (updatingOrderId === id) return; // Prevent duplicate requests
 
     try {
       setUpdatingOrderId(id);
-      const res = await axios.put(`${API_URL}/v1/payments/admin/orders/${id}/status`, {
-        orderStatus: newStatus
-      }, getAuthHeaders());
+      const res = await api.put(`/payments/admin/orders/${id}/status`, {
+        orderStatus: newStatus,
+      });
 
       if (res.data.success) {
-        setOrders(prevOrders => prevOrders.map(order =>
-          order._id === id ? { ...order, orderStatus: newStatus } : order
-        ));
+        setOrders((prevOrders) =>
+          prevOrders.map((order) =>
+            order._id === id ? { ...order, orderStatus: newStatus } : order
+          )
+        );
         toast.success(`Order status updated to ${newStatus}`);
       }
-    } catch (err: any) {
-      console.error('Failed to update order status', err);
-      if (err.response?.status === 401) {
-        handleAuthError();
-      } else {
-        toast.error(err.response?.data?.message || 'Failed to update order status');
-      }
+    } catch (err) {
+      toastApiError(err, 'Failed to update order status');
     } finally {
       setUpdatingOrderId(null);
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString();
-  };
+  // Filtering stays client-side over the already-fetched list, exactly as
+  // before — no new query parameters reach the API.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase().replace(/^#/, '');
+    return orders.filter((order) => {
+      if (statusFilter !== 'all' && order.orderStatus !== statusFilter) return false;
+      if (!q) return true;
+      // Match the raw id so both the displayed short id and a full id work.
+      return (
+        order._id.toLowerCase().includes(q) ||
+        (order.user?.name || '').toLowerCase().includes(q)
+      );
+    });
+  }, [orders, query, statusFilter]);
 
-  const formatFullDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString();
-  };
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  if (loading) {
-    return (
-      <div className="max-w-[1600px] mx-auto mt-2 pb-12 flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-[#5b3db8]"></div>
-      </div>
-    );
-  }
+  // Derived from `orders`, not held in state, so an inline status change is
+  // reflected in the open modal.
+  //
+  // Closing clears `detailOpen` but deliberately leaves `selectedOrder` set, so
+  // the panel keeps its content while it animates out rather than blanking
+  // mid-fade. (Stashing the last order in a ref would also work, but reading a
+  // ref during render isn't reactive and the React Compiler rejects it.)
+  const modalOrder = orders.find((o) => o._id === selectedOrder) ?? null;
+
+  const isSearching = query.trim() !== '' || statusFilter !== 'all';
 
   return (
-    <div className="max-w-[1600px] mx-auto mt-2 pb-12">
-      <div className="flex flex-col xl:flex-row gap-6 items-start">
+    <>
+      <PageHeader
+        eyebrow="Fulfilment"
+        title="Orders"
+        description="Every order placed through the storefront, with its payment state and progress from processing to delivery."
+      />
 
-        {/* Left Column: Orders List */}
-        <div className="flex-1 min-w-0 bg-white rounded-[24px] p-6 lg:p-8 shadow-sm border border-slate-100/60 w-full transition-all duration-300">
-          <div className="mb-8">
-            <h2 className="text-[16px] font-medium text-slate-800">All Orders</h2>
+      <Reveal>
+        <Card padded={false} className="p-5 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
+            <SearchInput
+              value={query}
+              onChange={changeQuery}
+              placeholder="Search by order id or customer…"
+              className="sm:max-w-xs w-full"
+            />
+            <div className="sm:w-[190px] w-full">
+              <Select
+                value={statusFilter}
+                onChange={(e) => changeStatusFilter(e.target.value as 'all' | OrderStatus)}
+                aria-label="Filter by order status"
+              >
+                <option value="all">All statuses</option>
+                {ORDER_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
 
-          {orders.length === 0 ? (
-            <div className="text-center py-16 text-slate-500">
-              <p className="text-lg font-medium">No orders yet</p>
-              <p className="text-sm mt-2">Orders will appear here once customers place them.</p>
-            </div>
+          {loading ? (
+            <SkeletonTable rows={6} cols={7} />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={<PackageSearch size={20} />}
+              eyebrow={isSearching ? 'No matches' : 'Nothing here yet'}
+              title={isSearching ? 'No orders match' : 'No orders yet'}
+              message={
+                isSearching
+                  ? 'Try a different order id, customer name, or status.'
+                  : 'Orders will appear here once customers place them.'
+              }
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[800px]">
-                <thead>
-                  <tr className="bg-[#f8fafc]">
-                    <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 rounded-l-[12px] w-[15%]">ID</th>
-                    <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 w-[25%]">Customer</th>
-                    <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 w-[10%]">Items</th>
-                    <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 w-[15%]">Total</th>
-                    <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 w-[15%]">Status</th>
-                    <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 w-[10%]">Date</th>
-                    <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 rounded-r-[12px] w-[10%]">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.map((order) => (
-                    <tr key={order._id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                      <td className="py-5 px-6 font-bold text-[#111827] text-[15px]">#{order._id.substring(0, 8)}</td>
-                      <td className="py-5 px-6">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-[#111827] text-[14px] leading-tight mb-0.5">{order.user?.name || 'Unknown'}</span>
-                          <span className="text-slate-500 text-[13px]">{order.user?.email || ''}</span>
-                        </div>
-                      </td>
-                      <td className="py-5 px-6 text-[15px] text-[#111827] font-medium">{order.items.length} items</td>
-                      <td className="py-5 px-6 font-bold text-[#111827] text-[15px]">₹{order.total}</td>
-                      <td className="py-5 px-4 sm:px-6">
-                        <div className={`relative inline-flex items-center rounded-[6px] ${getStatusStyle(order.orderStatus)} ${updatingOrderId === order._id ? 'opacity-70 pointer-events-none' : ''}`}>
-                          <select
-                            value={order.orderStatus}
-                            onChange={(e) => handleStatusChange(order._id, e.target.value)}
-                            disabled={updatingOrderId === order._id}
-                            className="appearance-none pl-3 pr-8 py-1.5 min-w-[110px] bg-transparent text-inherit text-[12px] sm:text-[13px] font-bold tracking-wide outline-none cursor-pointer disabled:cursor-not-allowed"
-                          >
-                            <option value="processing" className="text-slate-800">Processing</option>
-                            <option value="shipped" className="text-slate-800">Shipped</option>
-                            <option value="delivered" className="text-slate-800">Delivered</option>
-                            <option value="cancelled" className="text-slate-800">Cancelled</option>
-                          </select>
-                          <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-inherit flex items-center justify-center">
-                            {updatingOrderId === order._id ? (
-                              <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
-                            ) : (
-                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                            )}
+            <>
+              <Table>
+                <THead>
+                  <Th>Order</Th>
+                  <Th>Customer</Th>
+                  <Th className="hidden md:table-cell">Date</Th>
+                  <Th align="right">Total</Th>
+                  <Th className="hidden md:table-cell">Payment</Th>
+                  <Th>Status</Th>
+                  <Th align="right">
+                    <span className="sr-only">Actions</span>
+                  </Th>
+                </THead>
+                <TBody>
+                  {paged.map((order) => {
+                    const updating = updatingOrderId === order._id;
+                    return (
+                      <Tr
+                        key={order._id}
+                        muted={TERMINAL_STATUSES.includes(order.orderStatus)}
+                      >
+                        <Td>
+                          <span className="block whitespace-nowrap">
+                            {shortId(order._id)}
+                          </span>
+                          <span className="block text-[12px] text-faint mt-0.5 whitespace-nowrap">
+                            {order.items.length}{' '}
+                            {order.items.length === 1 ? 'item' : 'items'}
+                          </span>
+                        </Td>
+
+                        <Td>
+                          <span className="block">{order.user?.name || 'Unknown'}</span>
+                          <span className="block text-[12px] text-muted mt-0.5">
+                            {order.user?.email || ''}
+                          </span>
+                        </Td>
+
+                        <Td className="hidden md:table-cell text-muted whitespace-nowrap">
+                          {formatDate(order.createdAt)}
+                        </Td>
+
+                        <Td align="right" className="whitespace-nowrap">
+                          {formatINR(order.total)}
+                        </Td>
+
+                        <Td className="hidden md:table-cell">
+                          <StatusBadge status={order.paymentStatus} />
+                        </Td>
+
+                        <Td>
+                          <div className="flex items-center gap-2">
+                            <div className="w-[150px]">
+                              <Select
+                                value={order.orderStatus}
+                                onChange={(e) =>
+                                  handleStatusChange(order._id, e.target.value)
+                                }
+                                disabled={updating}
+                                aria-label={`Order status for ${shortId(order._id)}`}
+                              >
+                                {ORDER_STATUSES.map((status) => (
+                                  <option key={status} value={status}>
+                                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                                  </option>
+                                ))}
+                              </Select>
+                            </div>
+                            {/* Reserved slot — the row must not jump while saving. */}
+                            <span className="w-4 shrink-0 flex items-center justify-center">
+                              {updating && <Spinner size={14} />}
+                            </span>
                           </div>
-                        </div>
-                      </td>
-                      <td className="py-5 px-6 text-[15px] text-[#111827] font-medium">{formatDate(order.createdAt)}</td>
-                      <td className="py-5 px-6">
-                        <button
-                          onClick={() => setSelectedOrder(order._id)}
-                          className="text-[#5b3db8] hover:text-[#4a2f96] transition-colors flex items-center justify-center p-2 rounded-full hover:bg-[#f4f1fb]"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        </Td>
+
+                        <Td align="right">
+                          <IconButton
+                            label={`View order ${shortId(order._id)}`}
+                            onClick={() => {
+                              setSelectedOrder(order._id);
+                              setDetailOpen(true);
+                            }}
+                            className="ml-auto"
+                          >
+                            <Eye size={15} />
+                          </IconButton>
+                        </Td>
+                      </Tr>
+                    );
+                  })}
+                </TBody>
+              </Table>
+
+              <Pagination
+                page={currentPage}
+                pageSize={PAGE_SIZE}
+                total={filtered.length}
+                onPageChange={setPage}
+                itemLabel="orders"
+              />
+            </>
           )}
-        </div>
+        </Card>
+      </Reveal>
 
-        {/* Right Column: Order Details Form */}
-        {activeOrder && (
-          <div className="w-full xl:w-[420px] shrink-0 bg-white shadow-sm border border-slate-100/60 rounded-[24px] xl:sticky xl:top-[0px] overflow-hidden flex flex-col xl:max-h-[calc(100vh-140px)] transition-all duration-300">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 lg:px-8 py-6 shrink-0">
-              <h2 className="text-[22px] font-bold text-[#111827]">Order Details</h2>
-              <button
-                onClick={() => setSelectedOrder(null)}
-                className="w-[32px] h-[32px] rounded-full bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
-            </div>
-
-            {/* Scrollable Details */}
-            <div className="flex-1 overflow-y-auto px-6 lg:px-8 pb-8 space-y-6 form-scrollbar">
-
-              {/* Order Information */}
-              <div>
-                <h3 className="text-[16px] font-bold text-[#111827] mb-3">Order Information</h3>
-                <div className="space-y-2 text-[14px] text-slate-700 font-medium">
-                  <p>Order ID: #{activeOrder._id}</p>
-                  <div className="flex items-center gap-2">
-                    <span>Status:</span>
-                    <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-[6px] text-[11px] font-bold tracking-wide uppercase ${getStatusStyle(activeOrder.orderStatus)}`}>
-                      {activeOrder.orderStatus}
-                    </span>
-                  </div>
-                  <p>Date: {formatFullDate(activeOrder.createdAt)}</p>
-                  <p>Payment: {activeOrder.paymentMethod}</p>
-                  <div className="flex items-center gap-2">
-                    <span>Payment Status:</span>
-                    <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-[6px] text-[11px] font-bold tracking-wide uppercase ${activeOrder.paymentStatus === 'completed' ? 'bg-[#dcfce7] text-[#16a34a]' : 'bg-[#fef3c7] text-[#d97706]'
-                      }`}>
-                      {activeOrder.paymentStatus}
-                    </span>
-                  </div>
-                  {activeOrder.razorpayOrderId && <p>Razorpay ID: {activeOrder.razorpayOrderId}</p>}
-                </div>
+      <Modal
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        eyebrow="Order detail"
+        title={modalOrder ? shortId(modalOrder._id) : ''}
+        size="lg"
+      >
+        {modalOrder && (
+          <div className="space-y-5">
+            <Section title="Order">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Detail label="Order ID" className="sm:col-span-2">
+                  <span className="break-all">{modalOrder._id}</span>
+                </Detail>
+                <Detail label="Placed">{formatDateTime(modalOrder.createdAt)}</Detail>
+                <Detail label="Order status">
+                  <StatusBadge status={modalOrder.orderStatus} />
+                </Detail>
+                <Detail label="Payment method">{modalOrder.paymentMethod}</Detail>
+                <Detail label="Payment status">
+                  <StatusBadge status={modalOrder.paymentStatus} />
+                </Detail>
+                {modalOrder.razorpayOrderId && (
+                  <Detail label="Razorpay ID" className="sm:col-span-2">
+                    <span className="break-all">{modalOrder.razorpayOrderId}</span>
+                  </Detail>
+                )}
               </div>
+            </Section>
 
-              {/* Customer Information */}
-              <div>
-                <h3 className="text-[16px] font-bold text-[#111827] mb-3">Customer Information</h3>
-                <div className="space-y-2 text-[14px] text-slate-700 font-medium">
-                  <p>Name: {activeOrder.user?.name || 'Unknown'}</p>
-                  <p>Email: {activeOrder.user?.email || 'N/A'}</p>
-                  {activeOrder.user?.phone && <p>Phone: {activeOrder.user.phone}</p>}
-                </div>
+            <Section title="Customer">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Detail label="Name">{modalOrder.user?.name || 'Unknown'}</Detail>
+                <Detail label="Email">{modalOrder.user?.email || 'N/A'}</Detail>
+                {modalOrder.user?.phone && (
+                  <Detail label="Phone">{modalOrder.user.phone}</Detail>
+                )}
               </div>
+            </Section>
 
-              {/* Shipping Address */}
-              <div>
-                <h3 className="text-[16px] font-bold text-[#111827] mb-3">Shipping Address</h3>
-                <div className="space-y-1.5 text-[14px] text-slate-700 font-medium">
-                  {activeOrder.shippingAddress?.street && <p>{activeOrder.shippingAddress.street}</p>}
-                  <p>{activeOrder.shippingAddress?.city}{activeOrder.shippingAddress?.state ? `, ${activeOrder.shippingAddress.state}` : ''}</p>
-                  <p>{activeOrder.shippingAddress?.zipCode}{activeOrder.shippingAddress?.country ? `, ${activeOrder.shippingAddress.country}` : ''}</p>
-                </div>
-              </div>
+            <Section title="Shipping address">
+              <address className="font-sans text-[13px] text-ink leading-relaxed not-italic">
+                {modalOrder.shippingAddress?.street && (
+                  <span className="block">{modalOrder.shippingAddress.street}</span>
+                )}
+                <span className="block">
+                  {modalOrder.shippingAddress?.city}
+                  {modalOrder.shippingAddress?.state
+                    ? `, ${modalOrder.shippingAddress.state}`
+                    : ''}
+                </span>
+                <span className="block">
+                  {modalOrder.shippingAddress?.zipCode}
+                  {modalOrder.shippingAddress?.country
+                    ? `, ${modalOrder.shippingAddress.country}`
+                    : ''}
+                </span>
+              </address>
+            </Section>
 
-              {/* Order Items */}
-              <div>
-                <h3 className="text-[16px] font-bold text-[#111827] mb-3">Order Items</h3>
-                <div className="space-y-4">
-                  {activeOrder.items.map((item, idx) => (
-                    <div key={idx} className="flex gap-3 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
-                      <div className="w-12 h-12 rounded-lg bg-slate-100 shrink-0 overflow-hidden">
-                        {item.product?.images?.[0] ? (
-                          <img src={item.product.images[0]} alt={item.product?.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full bg-slate-200" />
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-0.5 flex-1">
-                        <p className="font-bold text-[#111827] text-[14px] leading-snug">{item.product?.name || 'Product unavailable'}</p>
-                        <p className="text-[13px] text-slate-500 font-medium">x{item.quantity}</p>
-                        <p className="font-bold text-[#111827] text-[14px] mt-1">₹{item.price}</p>
-                      </div>
+            <Section title="Items">
+              <ul className="divide-y divide-line -mt-1">
+                {modalOrder.items.map((item, idx) => (
+                  <li key={idx} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
+                    <Thumb
+                      src={item.product?.images?.[0]}
+                      alt={item.product?.name || 'Product'}
+                      className="w-12 h-12"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-sans text-[13px] text-ink leading-snug">
+                        {item.product?.name || 'Product unavailable'}
+                      </p>
+                      <p className="font-sans text-[12px] text-faint mt-0.5">
+                        &times;{item.quantity}
+                      </p>
                     </div>
-                  ))}
+                    <p className="font-sans text-[13px] text-ink whitespace-nowrap">
+                      {formatINR(item.price)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+
+            <Section title="Price breakdown">
+              <dl className="font-sans text-[13px]">
+                <div className="flex items-baseline justify-between py-1.5">
+                  <dt className="text-muted">Subtotal</dt>
+                  <dd className="text-ink">{formatINR(modalOrder.subtotal)}</dd>
                 </div>
-              </div>
-
-              {/* Price Breakdown */}
-              <div>
-                <h3 className="text-[16px] font-bold text-[#111827] mb-3">Price Breakdown</h3>
-                <div className="space-y-2 text-[14px] text-slate-700 font-medium">
-                  <div className="flex justify-between"><span>Subtotal:</span><span>₹{activeOrder.subtotal}</span></div>
-                  {activeOrder.discount > 0 && (
-                    <div className="flex justify-between text-green-600"><span>Discount:</span><span>-₹{activeOrder.discount}</span></div>
-                  )}
-                  <div className="flex justify-between"><span>Shipping:</span><span>{activeOrder.shippingFee > 0 ? `₹${activeOrder.shippingFee}` : 'Free'}</span></div>
+                {modalOrder.discount > 0 && (
+                  <div className="flex items-baseline justify-between py-1.5 text-success">
+                    <dt>Discount</dt>
+                    <dd>&minus;{formatINR(modalOrder.discount)}</dd>
+                  </div>
+                )}
+                <div className="flex items-baseline justify-between py-1.5">
+                  <dt className="text-muted">Shipping</dt>
+                  <dd className="text-ink">
+                    {modalOrder.shippingFee > 0
+                      ? formatINR(modalOrder.shippingFee)
+                      : 'Free'}
+                  </dd>
                 </div>
-              </div>
-
-            </div>
-
-            {/* Total Footer */}
-            <div className="px-6 lg:px-8 py-6 shrink-0 flex items-center justify-between border-t border-slate-100">
-              <span className="text-[16px] font-bold text-[#111827]">Total Amount:</span>
-              <span className="text-[18px] font-bold text-[#5b3db8]">₹{activeOrder.total}</span>
-            </div>
+                <div className="flex items-baseline justify-between border-t border-line mt-3 pt-4">
+                  <dt className="eyebrow text-bronze-deep">Total</dt>
+                  <dd className="font-display font-light text-2xl text-ink leading-none">
+                    {formatINR(modalOrder.total)}
+                  </dd>
+                </div>
+              </dl>
+            </Section>
           </div>
         )}
-
-      </div>
-    </div>
+      </Modal>
+    </>
   );
 }

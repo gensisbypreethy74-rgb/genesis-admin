@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
+import { AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 export default function Error({
   error,
@@ -15,21 +17,20 @@ export default function Error({
 
   return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center px-4 text-center">
-      <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6">
-        <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
+      <div className="w-12 h-12 mb-5 flex items-center justify-center border border-danger/30 bg-danger-tint text-danger">
+        <AlertTriangle size={20} strokeWidth={1.5} />
       </div>
-      <h2 className="text-2xl font-bold text-slate-900 mb-2">Something went wrong!</h2>
-      <p className="text-slate-500 mb-6 max-w-md">
-        An unexpected error occurred. Our team has been notified.
+      <p className="eyebrow text-bronze-deep mb-2">Something broke</p>
+      <h2 className="font-display font-light text-3xl text-ink leading-tight">
+        This page didn&apos;t load
+      </h2>
+      <p className="font-sans text-[13px] text-muted mt-2 mb-7 max-w-sm leading-relaxed">
+        An unexpected error occurred. Try again — if it keeps happening, the
+        backend may be unreachable.
       </p>
-      <button
-        onClick={() => reset()}
-        className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium transition-colors"
-      >
-        Try again
-      </button>
+      <Button variant="solid" size="sm" onClick={() => reset()}>
+        Try Again
+      </Button>
     </div>
   );
 }

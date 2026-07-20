@@ -1,8 +1,31 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import axios from 'axios';
+import { Pencil, Trash2, X, ImageIcon } from 'lucide-react';
+import {
+  Button,
+  Card,
+  CardHeader,
+  PageHeader,
+  Table,
+  THead,
+  TBody,
+  Th,
+  Tr,
+  Td,
+  Checkbox,
+  ConfirmDialog,
+  Field,
+  Input,
+  StatusBadge,
+  SkeletonTable,
+  EmptyState,
+  Thumb,
+  ImagePicker,
+  IconButton,
+} from '@/components/ui';
+import { api, apiErrorMessage } from '@/lib/api';
 
 interface IBanner {
   _id: string;
@@ -13,6 +36,9 @@ interface IBanner {
   status: string;
 }
 
+/** Unchanged from the previous implementation — the backend rejects above this. */
+const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
+
 export default function BannersPage() {
   const [banners, setBanners] = useState<IBanner[]>([]);
   const [isAddBannerOpen, setIsAddBannerOpen] = useState(false);
@@ -20,33 +46,50 @@ export default function BannersPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [deleteModal, setDeleteModal] = useState<{isOpen: boolean, bannerId: string | null}>({ isOpen: false, bannerId: null });
+  const [deleteModal, setDeleteModal] = useState<{
+    isOpen: boolean;
+    bannerId: string | null;
+  }>({ isOpen: false, bannerId: null });
 
-  // Form State
+  // Form State. `image`/`mobileImage` hold an existing path from the API;
+  // `imageFile`/`mobileImageFile` hold a freshly-picked File. Exactly one of
+  // each pair is live at a time — that distinction drives what goes on the wire.
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [image, setImage] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [mobileImage, setMobileImage] = useState('');
   const [mobileImageFile, setMobileImageFile] = useState<File | null>(null);
+  // The storefront only renders banners whose status is 'ACTIVE'
+  // (genesis-Frontend HeroSection filters on it), but this form used to hardcode
+  // 'ACTIVE' on every save — so a banner could never be taken down from here,
+  // and editing a hidden one silently republished it. The field was already on
+  // the wire; it just had no control.
+  const [isActive, setIsActive] = useState(true);
 
-  const fetchBanners = async () => {
+  const fetchBanners = useCallback(async () => {
     try {
-      const res = await axios.get(`${process.env.NEXT_PUBLIC_BACKEND_URL}/v1/banners`);
+      const res = await api.get('/banners');
       const data = res.data;
       if (data.success) {
         setBanners(data.data);
       }
     } catch (err) {
-      console.error('Failed to fetch banners', err);
+      toast.error(apiErrorMessage(err, 'Could not load banners.'));
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchBanners();
   }, []);
+
+  // Awaited inside an async IIFE rather than called bare: `react-hooks/
+  // set-state-in-effect` (React Compiler) can't see past a named async
+  // function reference and flags `fetchBanners()` here as a synchronous
+  // setState. Don't inline it back.
+  useEffect(() => {
+    void (async () => {
+      await fetchBanners();
+    })();
+  }, [fetchBanners]);
 
   const handleAddClick = () => {
     setEditingId(null);
@@ -56,6 +99,7 @@ export default function BannersPage() {
     setImageFile(null);
     setMobileImage('');
     setMobileImageFile(null);
+    setIsActive(true);
     setIsAddBannerOpen(true);
   };
 
@@ -67,6 +111,9 @@ export default function BannersPage() {
     setImageFile(null);
     setMobileImage(banner.mobileImage || '');
     setMobileImageFile(null);
+    // Carry the banner's real status in, so saving an edit can't silently
+    // republish something that was deliberately taken down.
+    setIsActive(banner.status !== 'INACTIVE');
     setIsAddBannerOpen(true);
   };
 
@@ -77,35 +124,59 @@ export default function BannersPage() {
     setMobileImageFile(null);
   };
 
+  /** Picking a file supersedes any existing path, as it did before. */
+  const selectDesktopImage = (file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('Image size must be less than 3MB');
+      return;
+    }
+    setImageFile(file);
+    setImage('');
+  };
+
+  const selectMobileImage = (file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('Image size must be less than 3MB');
+      return;
+    }
+    setMobileImageFile(file);
+    setMobileImage('');
+  };
+
   const handleSubmit = async () => {
-    if (!title || !description || (!image && !imageFile) || (!mobileImage && !mobileImageFile)) {
-      return toast.error('Title, description, and both images are required');
+    if (
+      !title ||
+      !description ||
+      (!image && !imageFile) ||
+      (!mobileImage && !mobileImageFile)
+    ) {
+      toast.error('Title, description, and both images are required');
+      return;
     }
 
-    const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
-
     if (imageFile && imageFile.size > MAX_FILE_SIZE) {
-      return toast.error('Laptop image size must be less than 3MB');
+      toast.error('Laptop image size must be less than 3MB');
+      return;
     }
 
     if (mobileImageFile && mobileImageFile.size > MAX_FILE_SIZE) {
-      return toast.error('Phone image size must be less than 3MB');
+      toast.error('Phone image size must be less than 3MB');
+      return;
     }
 
     setSaving(true);
-    const token = localStorage.getItem('adminToken');
-    
+
     const formData = new FormData();
     formData.append('title', title);
     formData.append('description', description);
-    formData.append('status', 'ACTIVE');
-    
+    formData.append('status', isActive ? 'ACTIVE' : 'INACTIVE');
+
     if (imageFile) {
       formData.append('image', imageFile);
     } else if (image) {
       formData.append('image', image);
     }
-    
+
     if (mobileImageFile) {
       formData.append('mobileImage', mobileImageFile);
     } else if (mobileImage) {
@@ -113,32 +184,24 @@ export default function BannersPage() {
     }
 
     try {
-      const url = editingId 
-        ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/v1/banners/${editingId}` 
-        : `${process.env.NEXT_PUBLIC_BACKEND_URL}/v1/banners`;
-      const method = editingId ? 'put' : 'post';
+      // axios sets the multipart boundary from the FormData itself; hand-setting
+      // Content-Type here would omit it and the upload would fail to parse.
+      const res = editingId
+        ? await api.put(`/banners/${editingId}`, formData)
+        : await api.post('/banners', formData);
 
-      const res = await axios({
-        method,
-        url,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${token}`
-        },
-        data: formData
-      });
-      
       const data = res.data;
       if (data.success) {
-        toast.success(editingId ? 'Banner updated successfully' : 'Banner created successfully');
+        toast.success(
+          editingId ? 'Banner updated successfully' : 'Banner created successfully'
+        );
         handleClosePanel();
         fetchBanners();
       } else {
         toast.error(data.message || 'Failed to save banner');
       }
     } catch (err) {
-      console.error(err);
-      toast.error('Error connecting to backend');
+      toast.error(apiErrorMessage(err, 'Error connecting to backend'));
     } finally {
       setSaving(false);
     }
@@ -149,261 +212,219 @@ export default function BannersPage() {
   };
 
   const confirmDelete = async () => {
-    if(!deleteModal.bannerId) return;
+    if (!deleteModal.bannerId) return;
     setDeleting(true);
-    const token = localStorage.getItem('adminToken');
     try {
-      const res = await axios.delete(`${process.env.NEXT_PUBLIC_BACKEND_URL}/v1/banners/${deleteModal.bannerId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await api.delete(`/banners/${deleteModal.bannerId}`);
       const data = res.data;
       if (data.success) {
         toast.success('Banner deleted successfully');
         fetchBanners();
         setDeleteModal({ isOpen: false, bannerId: null });
       } else {
-        toast.error(data.message);
+        toast.error(data.message || 'Failed to delete banner');
       }
     } catch (err) {
-      console.error(err);
-      toast.error('Error deleting banner');
+      toast.error(apiErrorMessage(err, 'Error deleting banner'));
     } finally {
       setDeleting(false);
     }
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto mt-2 pb-12">
+    <div className="pb-4">
+      <PageHeader
+        eyebrow="Storefront"
+        title="Banners"
+        description="The rotating hero imagery on the homepage. Each banner carries a wide crop for desktop and a tall crop for phones."
+        action={
+          <Button variant="solid" size="sm" onClick={handleAddClick}>
+            Add Banner
+          </Button>
+        }
+      />
+
       <div className="flex flex-col xl:flex-row gap-6 items-start">
-        
-        {/* Left Column: Banners Catalog */}
-        <div className="flex-1 min-w-0 bg-white rounded-[24px] p-6 lg:p-8 shadow-sm border border-slate-100/60 w-full transition-all duration-300">
-          
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-[16px] font-medium text-slate-800">Homepage Banners</h2>
-            <button 
-              onClick={handleAddClick}
-              className="bg-[#5b3db8] hover:bg-[#4a2f96] text-white px-6 py-2.5 rounded-[12px] font-medium text-[14px] flex items-center gap-2 transition-colors shadow-sm"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-              Add New Banner
-            </button>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[800px]">
-              <thead>
-                <tr className="bg-[#f8fafc]">
-                  <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 rounded-l-[12px] w-[35%]">Preview</th>
-                  <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 w-[20%]">Title</th>
-                  <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 w-[30%]">Description</th>
-                  <th className="py-4 px-6 text-[13px] font-semibold text-slate-500 rounded-r-[12px] w-[15%]">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={4} className="py-8 text-center text-slate-500">Loading banners...</td></tr>
-                ) : banners.length === 0 ? (
-                  <tr><td colSpan={4} className="py-8 text-center text-slate-500">No banners found. Add your first banner!</td></tr>
-                ) : banners.map((banner) => (
-                  <tr key={banner._id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
-                    <td className="py-5 px-6">
-                      <div className="flex gap-3">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[10px] text-slate-500 font-semibold uppercase">Laptop</span>
-                          <img 
-                            src={banner.image && banner.image.startsWith('/') ? `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('/api', '') || 'http://localhost:5000'}${banner.image}` : banner.image} 
-                            alt={banner.title} 
-                            className="w-[120px] h-[60px] rounded-[8px] object-cover bg-slate-100 shadow-sm border border-slate-200" 
-                          />
-                        </div>
-                        {banner.mobileImage && (
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] text-slate-500 font-semibold uppercase">Mobile</span>
-                            <img 
-                              src={banner.mobileImage.startsWith('/') ? `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('/api', '') || 'http://localhost:5000'}${banner.mobileImage}` : banner.mobileImage} 
-                              alt={`${banner.title} mobile`} 
-                              className="w-[40px] h-[60px] rounded-[8px] object-cover bg-slate-100 shadow-sm border border-slate-200" 
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-5 px-6 font-bold text-[#111827] text-[15px]">{banner.title}</td>
-                    <td className="py-5 px-6 text-[15px] text-slate-700 font-medium leading-snug">{banner.description}</td>
-                    <td className="py-5 px-6">
-                      <div className="flex items-center gap-3">
-                        <button 
+        {/* Left column: the banner list. */}
+        <Card padded={false} className="flex-1 min-w-0 w-full p-5 sm:p-6">
+          {loading ? (
+            <SkeletonTable rows={4} cols={5} />
+          ) : banners.length === 0 ? (
+            <EmptyState
+              title="No banners yet"
+              message="Add a banner to fill the homepage hero. You'll need a desktop crop and a mobile crop."
+              icon={<ImageIcon size={18} aria-hidden />}
+              action={
+                <Button variant="solid" size="sm" onClick={handleAddClick}>
+                  Add Banner
+                </Button>
+              }
+            />
+          ) : (
+            <Table>
+              <THead>
+                <Th>Desktop</Th>
+                <Th className="hidden md:table-cell">Mobile</Th>
+                <Th>Banner</Th>
+                <Th>Status</Th>
+                <Th align="right">Actions</Th>
+              </THead>
+              <TBody>
+                {banners.map((banner) => (
+                  <Tr key={banner._id}>
+                    <Td>
+                      <Thumb
+                        src={banner.image}
+                        alt={banner.title}
+                        ratio="aspect-[16/9]"
+                        className="w-[128px]"
+                      />
+                    </Td>
+                    <Td className="hidden md:table-cell">
+                      <Thumb
+                        src={banner.mobileImage}
+                        alt={`${banner.title} — mobile crop`}
+                        ratio="aspect-[4/5]"
+                        className="w-[52px]"
+                      />
+                    </Td>
+                    <Td>
+                      <span className="block text-ink">{banner.title}</span>
+                      {banner.description && (
+                        <span className="block text-[12px] text-muted mt-1 leading-snug max-w-[280px] line-clamp-2">
+                          {banner.description}
+                        </span>
+                      )}
+                    </Td>
+                    <Td>
+                      {banner.status ? (
+                        <StatusBadge status={banner.status} />
+                      ) : (
+                        <span className="text-faint">—</span>
+                      )}
+                    </Td>
+                    <Td align="right">
+                      <div className="flex items-center justify-end gap-2">
+                        <IconButton
+                          label="Edit banner"
                           onClick={() => handleEditClick(banner)}
-                          className="w-[38px] h-[38px] rounded-[10px] bg-[#eff6ff] text-[#5b3db8] hover:bg-[#ece7f8] flex items-center justify-center transition-colors"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                        </button>
-                        <button 
+                          <Pencil size={14} />
+                        </IconButton>
+                        <IconButton
+                          label="Delete banner"
+                          tone="danger"
                           onClick={() => handleDeleteClick(banner._id)}
-                          className="w-[38px] h-[38px] rounded-[10px] bg-[#fef2f2] text-[#ef4444] hover:bg-red-100 flex items-center justify-center transition-colors"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        </button>
+                          <Trash2 size={14} />
+                        </IconButton>
                       </div>
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </TBody>
+            </Table>
+          )}
+        </Card>
 
-        {/* Right Column: Add/Edit Banner Form */}
+        {/* Right column: the add/edit panel, in its original placement. */}
         {isAddBannerOpen && (
-          <div className="w-full xl:w-[420px] shrink-0 bg-white shadow-sm border border-slate-100/60 rounded-[24px] xl:sticky xl:top-[120px] overflow-hidden flex flex-col xl:max-h-[calc(100vh-140px)] transition-all duration-300">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 lg:px-8 py-6 shrink-0">
-              <h2 className="text-[20px] font-bold text-[#111827]">
-                {editingId ? 'Edit Banner' : 'Add New Banner'}
-              </h2>
-              <button 
-                onClick={handleClosePanel}
-                className="w-[32px] h-[32px] rounded-full bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
+          <Card
+            padded={false}
+            className="w-full xl:w-[420px] shrink-0 xl:sticky xl:top-0 flex flex-col xl:max-h-[calc(100vh-9rem)]"
+          >
+            <div className="p-5 sm:p-6 border-b border-line shrink-0">
+              <CardHeader
+                eyebrow={editingId ? 'Editing' : 'Create'}
+                title={editingId ? 'Edit Banner' : 'New Banner'}
+                action={
+                  <IconButton label="Close panel" onClick={handleClosePanel}>
+                    <X size={14} />
+                  </IconButton>
+                }
+              />
             </div>
 
-            {/* Scrollable Form */}
-            <div className="flex-1 overflow-y-auto px-6 lg:px-8 pb-8 space-y-6 form-scrollbar">
-              {/* Banner Title */}
-              <div>
-                <label className="block text-[13px] font-bold text-[#111827] mb-2.5">Banner Title</label>
-                <input 
-                  type="text" 
+            <div className="flex-1 overflow-y-auto thin-scrollbar p-5 sm:p-6 space-y-5">
+              <Field label="Banner Title" htmlFor="banner-title" required>
+                <Input
+                  id="banner-title"
+                  type="text"
                   value={title}
-                  onChange={e => setTitle(e.target.value)}
-                  className="w-full h-[48px] px-4 rounded-[12px] border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#5b3db8]/20 focus:border-[#5b3db8] transition-all text-[14px]" 
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Autumn Edit"
                 />
-              </div>
+              </Field>
 
-              {/* Description */}
-              <div>
-                <label className="block text-[13px] font-bold text-[#111827] mb-2.5">Description</label>
-                <input 
-                  type="text" 
+              <Field label="Description" htmlFor="banner-description" required>
+                <Input
+                  id="banner-description"
+                  type="text"
                   value={description}
-                  onChange={e => setDescription(e.target.value)}
-                  className="w-full h-[48px] px-4 rounded-[12px] border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#5b3db8]/20 focus:border-[#5b3db8] transition-all text-[14px]" 
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Hand-finished pieces for the season"
+                />
+              </Field>
+
+              {/* Two pickers, two distinct fields — the storefront picks between
+                  them by viewport, so both are required. */}
+              <ImagePicker
+                label="Desktop image"
+                hint="Wide crop, around 1920×1080. Max 3MB."
+                ratio="aspect-[16/9]"
+                file={imageFile}
+                url={image}
+                onSelect={selectDesktopImage}
+                onClear={() => {
+                  setImageFile(null);
+                  setImage('');
+                }}
+              />
+
+              <ImagePicker
+                label="Mobile image"
+                hint="Tall crop, around 1080×1350. Max 3MB."
+                ratio="aspect-[4/5]"
+                file={mobileImageFile}
+                url={mobileImage}
+                onSelect={selectMobileImage}
+                onClear={() => {
+                  setMobileImageFile(null);
+                  setMobileImage('');
+                }}
+              />
+
+              <div className="border-t border-line pt-5">
+                <Checkbox
+                  label="Live on the storefront"
+                  description="Only active banners appear on the homepage."
+                  checked={isActive}
+                  onChange={setIsActive}
                 />
               </div>
 
-              {/* Laptop Image Upload */}
-              <div>
-                <label className="block text-[13px] font-bold text-[#111827] mb-2.5">Laptop Size Photo</label>
-                <input 
-                  type="file" 
-                  accept="image/*"
-                  onChange={e => {
-                    if (e.target.files && e.target.files.length > 0) {
-                      const file = e.target.files[0];
-                      if (file.size > 3 * 1024 * 1024) {
-                        toast.error('Image size must be less than 3MB');
-                        e.target.value = '';
-                        return;
-                      }
-                      setImageFile(file);
-                      setImage('');
-                    }
-                  }}
-                  className="w-full text-[14px] file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#f4f1fb] file:text-[#5b3db8] hover:file:bg-[#ece7f8] transition-colors cursor-pointer" 
-                />
-                {(image || imageFile) && (
-                  <div className="mt-4">
-                    <p className="text-[12px] font-semibold text-slate-500 mb-2">Image Preview</p>
-                    <img 
-                      src={imageFile ? URL.createObjectURL(imageFile) : (image.startsWith('/') ? `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('/api', '') || 'http://localhost:5000'}${image}` : image)} 
-                      alt="Preview" 
-                      className="w-full h-[120px] rounded-lg object-cover border border-slate-200 shadow-sm"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Mobile Image Upload */}
-              <div>
-                <label className="block text-[13px] font-bold text-[#111827] mb-2.5">Phone Size Photo</label>
-                <input 
-                  type="file" 
-                  accept="image/*"
-                  onChange={e => {
-                    if (e.target.files && e.target.files.length > 0) {
-                      const file = e.target.files[0];
-                      if (file.size > 3 * 1024 * 1024) {
-                        toast.error('Image size must be less than 3MB');
-                        e.target.value = '';
-                        return;
-                      }
-                      setMobileImageFile(file);
-                      setMobileImage('');
-                    }
-                  }}
-                  className="w-full text-[14px] file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#f4f1fb] file:text-[#5b3db8] hover:file:bg-[#ece7f8] transition-colors cursor-pointer" 
-                />
-                {(mobileImage || mobileImageFile) && (
-                  <div className="mt-4">
-                    <p className="text-[12px] font-semibold text-slate-500 mb-2">Image Preview</p>
-                    <img 
-                      src={mobileImageFile ? URL.createObjectURL(mobileImageFile) : (mobileImage.startsWith('/') ? `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('/api', '') || 'http://localhost:5000'}${mobileImage}` : mobileImage)} 
-                      alt="Mobile Preview" 
-                      className="w-[120px] h-[180px] rounded-lg object-cover border border-slate-200 shadow-sm"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Submit Button */}
-              <div className="pt-2">
-                <button 
-                  onClick={handleSubmit}
-                  disabled={saving}
-                  className={`w-full ${editingId ? 'bg-[#10b981] hover:bg-emerald-600' : 'bg-[#5b3db8] hover:bg-[#4a2f96]'} text-white h-[48px] rounded-[12px] font-bold text-[15px] transition-colors shadow-sm ${saving ? 'opacity-70 cursor-not-allowed' : ''}`}
-                >
-                  {saving ? 'Saving...' : (editingId ? 'Update Banner' : 'Create Banner')}
-                </button>
-              </div>
+              <Button
+                variant="solid"
+                onClick={handleSubmit}
+                loading={saving}
+                className="w-full"
+              >
+                {editingId ? 'Update Banner' : 'Create Banner'}
+              </Button>
             </div>
-          </div>
+          </Card>
         )}
-        
       </div>
 
-      {/* Delete Confirmation Modal */}
-      {deleteModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-[24px] p-8 max-w-[400px] w-full shadow-2xl transform transition-all">
-            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-            </div>
-            <h3 className="text-[20px] font-bold text-center text-slate-900 mb-2">Delete Banner?</h3>
-            <p className="text-slate-500 text-center text-[15px] mb-8 leading-relaxed">
-              Are you sure you want to delete this banner? This action cannot be undone.
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setDeleteModal({ isOpen: false, bannerId: null })}
-                disabled={deleting}
-                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 h-[48px] rounded-[14px] font-bold text-[15px] transition-colors"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={confirmDelete}
-                disabled={deleting}
-                className={`flex-1 bg-red-500 hover:bg-red-600 text-white h-[48px] rounded-[14px] font-bold text-[15px] transition-colors shadow-sm shadow-red-500/20 ${deleting ? 'opacity-70 cursor-not-allowed' : ''}`}
-              >
-                {deleting ? 'Deleting...' : 'Yes, Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, bannerId: null })}
+        onConfirm={confirmDelete}
+        title="Delete banner?"
+        message="This banner will be removed from the homepage immediately. This action cannot be undone."
+        confirmLabel="Delete banner"
+        loading={deleting}
+      />
     </div>
   );
 }

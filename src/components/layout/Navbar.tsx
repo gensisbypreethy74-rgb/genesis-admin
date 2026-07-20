@@ -1,46 +1,87 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import { usePathname } from 'next/navigation';
+import { Menu, ArrowUpRight } from 'lucide-react';
+import {
+  getAdminUser,
+  getAdminUserServerSnapshot,
+  subscribeToAdminUser,
+} from '@/lib/adminSession';
+import { navItemForPath } from './navigation';
 
 interface NavbarProps {
   onMenuClick: () => void;
 }
 
+const STOREFRONT_URL =
+  process.env.NEXT_PUBLIC_STOREFRONT_URL || 'http://localhost:3000';
+
+/**
+ * Slim top bar. The page title now lives in each page's PageHeader, so this
+ * carries only what the sidebar can't: the mobile menu trigger, the current
+ * section on mobile (where the sidebar is hidden), a link out to the live
+ * storefront, and who is signed in.
+ */
 export default function Navbar({ onMenuClick }: NavbarProps) {
   const pathname = usePathname();
-  
-  let title = 'Dashboard';
-  if (pathname.includes('/products')) title = 'Products';
-  else if (pathname.includes('/categories')) title = 'Categories';
-  else if (pathname.includes('/orders')) title = 'Orders';
-  else if (pathname.includes('/banners')) title = 'Banners';
-  else if (pathname.includes('/customers')) title = 'Customers';
+
+  // localStorage is an external store: null on the server, real after hydration,
+  // and re-read if another tab signs out.
+  const user = useSyncExternalStore(
+    subscribeToAdminUser,
+    getAdminUser,
+    getAdminUserServerSnapshot
+  );
+
+  const section = navItemForPath(pathname);
+  const name = user?.name?.trim() || 'Studio';
+  const initial = name.charAt(0).toUpperCase();
 
   return (
-    <header className="bg-white border-b border-slate-200 h-[64px] lg:h-[100px] flex items-center justify-between px-4 sm:px-6 lg:px-8 z-40 sticky top-0 shrink-0">
-      <div className="flex items-center gap-3 lg:gap-0">
-        {/* Hamburger menu button (mobile only) */}
+    <header className="bg-ivory border-b border-line h-[68px] lg:h-[76px] flex items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 sticky top-0 z-30 shrink-0">
+      <div className="flex items-center gap-3 min-w-0">
         <button
           onClick={onMenuClick}
-          className="lg:hidden w-10 h-10 flex items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 transition-colors -ml-1"
+          aria-label="Open navigation"
+          className="lg:hidden w-9 h-9 -ml-1 shrink-0 flex items-center justify-center border border-line text-muted hover:text-ink hover:border-ink/40 transition-colors duration-300 ease-editorial"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
+          <Menu size={16} />
         </button>
 
-        <div className="flex flex-col justify-center">
-          <h1 className="text-[22px] sm:text-[28px] lg:text-[32px] font-bold text-slate-900 tracking-tight leading-tight">{title}</h1>
-          <p className="text-[12px] sm:text-[13px] lg:text-[15px] text-slate-500 font-medium mt-0.5 lg:mt-1 hidden sm:block">Welcome back, System Admin</p>
-        </div>
+        {/* Desktop shows the section in the sidebar already; this is for mobile. */}
+        {section && (
+          <p className="lg:hidden eyebrow-tight text-muted truncate">
+            {section.title}
+          </p>
+        )}
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-[14px] bg-[#5b3db8] text-white flex items-center justify-center text-lg lg:text-xl font-bold shadow-sm">
-            S
+      <div className="flex items-center gap-3 sm:gap-5 shrink-0">
+        <a
+          href={STOREFRONT_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="hidden sm:inline-flex items-center gap-1.5 eyebrow-tight text-muted hover:text-ink transition-colors duration-300 ease-editorial"
+        >
+          View Storefront
+          <ArrowUpRight size={12} aria-hidden />
+        </a>
+
+        <span aria-hidden className="hidden sm:block h-5 w-px bg-line" />
+
+        <div className="flex items-center gap-2.5">
+          <div className="text-right hidden sm:block">
+            <p className="font-sans text-[12px] text-ink leading-tight">{name}</p>
+            <p className="eyebrow-tight text-faint mt-0.5">
+              {user?.role || 'Administrator'}
+            </p>
           </div>
-          <div className="flex-col hidden sm:flex">
-            <span className="text-[15px] font-bold text-slate-900 leading-tight">System Admin</span>
-            <span className="text-[13px] text-slate-500 font-medium">Administrator</span>
+          <div
+            aria-hidden
+            className="w-9 h-9 rounded-full bg-ink text-ivory flex items-center justify-center font-display text-[15px] shrink-0"
+          >
+            {initial}
           </div>
         </div>
       </div>

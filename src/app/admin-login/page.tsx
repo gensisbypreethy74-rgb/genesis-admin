@@ -3,6 +3,34 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
+import { Eye, EyeOff } from 'lucide-react';
+import { Button, Field, Input, Reveal } from '@/components/ui';
+import Logo from '@/components/ui/Logo';
+import { setAdminSession } from '@/lib/adminSession';
+
+/**
+ * Turn a failed login into something the reader can act on.
+ *
+ * `axios` rejects on every non-2xx, so the previous blanket catch reported a
+ * wrong password, a rate-limit and a genuinely dead server all as "Connection
+ * refused. Is the backend server running?".
+ */
+function loginErrorMessage(err: unknown): string {
+  if (!axios.isAxiosError(err) || !err.response) {
+    // No response at all: DNS, refused connection, CORS, or the URL is wrong
+    // because NEXT_PUBLIC_BACKEND_URL is unset.
+    return 'Could not reach the server. Check that the backend is running.';
+  }
+
+  const status = err.response.status;
+  const serverMessage = (err.response.data as { message?: string } | undefined)?.message;
+
+  if (status === 401 || status === 400) return serverMessage || 'Invalid email or password.';
+  if (status === 403) return serverMessage || 'This account cannot access the studio.';
+  if (status === 429) return 'Too many attempts. Please wait a few minutes and try again.';
+  if (status >= 500) return 'The server had a problem signing you in. Please try again.';
+  return serverMessage || 'Could not sign you in. Please try again.';
+}
 
 export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
@@ -17,13 +45,21 @@ export default function AdminLoginPage() {
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
     if (token) {
+      // Backfill the session cookie for sessions created before the cookie
+      // existed, so the middleware recognises them instead of looping back here.
+      const user = localStorage.getItem('adminUser');
+      setAdminSession(token, user ? JSON.parse(user) : null);
       router.push('/dashboard');
     }
   }, [router]);
 
+  // This is the one page that legitimately talks to the backend with raw axios
+  // rather than the shared `api` client: that client's 401 interceptor clears
+  // the session and redirects here, which on the login page itself would mean a
+  // failed sign-in bounces the page instead of showing "invalid credentials".
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Client-side validation
     const errors: { email?: string; password?: string } = {};
     if (!email.trim()) {
@@ -38,7 +74,7 @@ export default function AdminLoginPage() {
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
-    
+
     setError('');
     setLoading(true);
 
@@ -47,121 +83,125 @@ export default function AdminLoginPage() {
       const data = res.data;
 
       if (data.success) {
-        localStorage.setItem('adminToken', data.data.token);
-        localStorage.setItem('adminUser', JSON.stringify(data.data));
+        setAdminSession(data.data.token, data.data);
 
         router.push('/dashboard');
       } else {
         setError(data.message || 'Invalid email or password');
       }
     } catch (err) {
-      setError('Connection refused. Is the backend server running?');
+      // The backend answers a bad password with 401 and a throttled client with
+      // 429 — axios rejects on both. Reporting every rejection as "connection
+      // refused" told you to go debug a server that was answering fine.
+      setError(loginErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#131B2A] flex items-center justify-center p-4 font-sans relative overflow-hidden">
-      {/* Background glow effects */}
-      <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-[#5b3db8]/5 blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-[#5b3db8]/5 blur-[120px] pointer-events-none"></div>
-
-      {/* Login Card */}
-      <div className="w-full max-w-[420px] bg-[#1E2536] rounded-[24px] p-10 shadow-2xl relative z-10 border border-white/[0.05]">
-
-        {/* Header */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-[64px] h-[64px] bg-gradient-to-tr from-[#4a2f96] to-[#5b3db8] rounded-[20px] flex items-center justify-center mb-6 shadow-lg shadow-[#5b3db8]/20">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-              <polyline points="9 12 11 14 15 10"></polyline>
-            </svg>
-          </div>
-          <h1 className="text-white text-[28px] font-bold tracking-tight mb-2">NeoKart Admin</h1>
-          <p className="text-slate-400 text-[14px]">Secure Management Portal Access</p>
-        </div>
-
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-[13px] p-3 rounded-[12px] mb-6 text-center font-medium">
-            {error}
-          </div>
-        )}
-
-        {/* Form */}
-        <form className="space-y-6" onSubmit={handleLogin}>
-
-          {/* Email Field */}
-          <div>
-            <label className="block text-slate-300 text-[13px] font-semibold mb-2">Administrator Email</label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-              </div>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => { setEmail(e.target.value); setFieldErrors(prev => ({...prev, email: undefined})); }}
-                placeholder="Enter your email"
-                className={`w-full h-[52px] bg-[#2A344A] text-white placeholder-slate-500 rounded-[14px] pl-11 pr-4 border focus:bg-[#2A344A] focus:outline-none focus:ring-1 focus:ring-[#5b3db8] transition-all text-[15px] ${fieldErrors.email ? 'border-red-500 focus:border-red-500' : 'border-transparent focus:border-[#5b3db8]'}`}
-              />
-            </div>
-            {fieldErrors.email && <p className="text-red-400 text-xs mt-1.5 font-medium">{fieldErrors.email}</p>}
-          </div>
-
-          {/* Password Field */}
-          <div>
-            <label className="block text-slate-300 text-[13px] font-semibold mb-2">Security Password</label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-              </div>
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setFieldErrors(prev => ({...prev, password: undefined})); }}
-                placeholder="••••••••"
-                className={`w-full h-[52px] bg-[#2A344A] text-white placeholder-slate-500 rounded-[14px] pl-11 pr-11 border focus:bg-[#2A344A] focus:outline-none focus:ring-1 focus:ring-[#5b3db8] transition-all text-[15px] ${fieldErrors.password ? 'border-red-500 focus:border-red-500' : 'border-transparent focus:border-[#5b3db8]'}`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-white transition-colors"
-              >
-                {showPassword ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-                )}
-              </button>
-            </div>
-            {fieldErrors.password && <p className="text-red-400 text-xs mt-1.5 font-medium">{fieldErrors.password}</p>}
-          </div>
-
-          {/* Submit Button */}
-          <div className="pt-4">
-            <button
-              type="submit"
-              disabled={loading}
-              className={`w-full h-[52px] bg-[#5b3db8] hover:bg-[#5b3db8] text-white rounded-[14px] font-bold text-[15px] flex items-center justify-center gap-2 transition-all shadow-lg shadow-[#5b3db8]/25 ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
-            >
-              {loading ? 'Authenticating...' : 'Access Dashboard'}
-              {!loading && <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>}
-            </button>
-          </div>
-
-        </form>
-
-        {/* Footer */}
-        <div className="mt-10 pt-8 border-t border-slate-700/50 flex flex-col items-center gap-4">
-          <p className="text-slate-500 text-[11px] font-semibold tracking-wider uppercase">
-            © 2026 NeoKart Luxury Cosmetics
+    <div className="min-h-screen bg-ivory flex flex-col md:flex-row">
+      {/* ── Left: editorial panel. No studio photography exists yet, so the
+             warm placeholder gradient carries the panel on its own. ── */}
+      <div className="img-placeholder relative hidden md:block md:w-1/2">
+        <div className="absolute inset-0 flex flex-col justify-end p-8 md:p-16 lg:p-20 pointer-events-none">
+          <p className="eyebrow text-bronze-deep mb-4">Genesis Studio</p>
+          <p className="font-display font-light text-2xl md:text-3xl leading-[1.15] text-ink max-w-sm">
+            Every piece is counted, corrected and put right here — long before
+            anyone sees it.
           </p>
-          <div className="bg-[#064e3b]/30 text-[#10b981] px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest uppercase border border-[#064e3b]/50">
-            256-BIT AES ENCRYPTED SESSION
-          </div>
         </div>
+      </div>
 
+      {/* ── Right: sign-in form ── */}
+      <div className="md:w-1/2 flex flex-col justify-center px-6 py-16 sm:px-10 md:p-16 lg:p-24">
+        <Reveal className="max-w-md mx-auto w-full">
+          {/* Ink mark: this half sits on ivory, where the gold washes out. */}
+          <div className="mb-12">
+            <Logo tone="ink" priority className="h-[30px]" />
+            <span className="block eyebrow-tight text-bronze-deep mt-2.5">Studio</span>
+          </div>
+
+          <p className="eyebrow text-bronze-deep mb-5">Studio Access</p>
+
+          <h1 className="font-display font-light text-[clamp(2.25rem,4.5vw,3.5rem)] leading-[1.08] text-ink mb-4">
+            Welcome back.
+          </h1>
+
+          <p className="font-sans text-muted text-base leading-relaxed mb-10">
+            Sign in to manage pieces, orders and the people they go to.
+          </p>
+
+          {error && (
+            <div
+              role="alert"
+              className="bg-danger-tint border border-danger/20 text-danger font-sans text-[13px] leading-relaxed px-4 py-3 mb-8"
+            >
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-6" noValidate>
+            <Field label="Email" htmlFor="email" error={fieldErrors.email}>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@genesisbypreethy.com"
+                value={email}
+                error={!!fieldErrors.email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setFieldErrors((prev) => ({ ...prev, email: undefined }));
+                }}
+              />
+            </Field>
+
+            <Field label="Password" htmlFor="password" error={fieldErrors.password}>
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className="pr-11"
+                  value={password}
+                  error={!!fieldErrors.password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setFieldErrors((prev) => ({ ...prev, password: undefined }));
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-0 px-3.5 flex items-center text-faint hover:text-ink transition-colors duration-200 ease-editorial cursor-pointer"
+                >
+                  {showPassword ? (
+                    <EyeOff size={16} aria-hidden />
+                  ) : (
+                    <Eye size={16} aria-hidden />
+                  )}
+                </button>
+              </div>
+            </Field>
+
+            <div className="pt-2">
+              <Button type="submit" variant="solid" loading={loading} className="w-full">
+                {loading ? 'Signing in' : 'Sign In'}
+              </Button>
+            </div>
+          </form>
+
+          <p className="font-sans text-[12px] text-faint leading-relaxed mt-10 pt-8 border-t border-line">
+            This panel is for Genesis studio staff. If you have arrived here by
+            mistake, no account will be created for you.
+          </p>
+        </Reveal>
       </div>
     </div>
   );

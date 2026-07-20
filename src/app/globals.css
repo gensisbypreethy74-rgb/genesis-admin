@@ -1,11 +1,220 @@
 @import "tailwindcss";
 
+/* ──────────────────────────────────────────────────────────────────────────
+   GENESIS BY PREETHY — ADMIN
+   The storefront's editorial system, tuned for administrative density.
+
+   Inherited verbatim from genesis-Frontend: the palette, both typefaces, the
+   single easing curve, square corners, and hairline rules instead of shadows.
+   Added here (and NOT in the storefront) are the things a storefront never
+   needed: semantic status tones, a denser control scale, and skeletons.
+
+   When extending: warm neutrals only, no pure black, no bright colour. A new
+   tone has to sit beside bronze and forest.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --background: #f5f0e8; /* ivory */
+  --foreground: #1c1a15; /* soft black */
+}
+
 @theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
   --font-sans: var(--font-inter);
+  --font-serif: var(--font-cormorant);
+}
+
+@theme {
+  /* ── Brand palette (identical to the storefront) ───────────────────────── */
+  --color-ivory: #f5f0e8; /* page background */
+  --color-cream: #faf6ef; /* raised panel / card */
+  --color-beige: #e8dfd0; /* hover fill */
+  --color-tan: #f0e8d8; /* warm band */
+  --color-sand: #ece3d3; /* placeholder tone / skeleton base */
+  --color-ink: #1c1a15; /* soft black text + sidebar */
+  --color-muted: #6f675a; /* secondary text */
+  --color-faint: #9a9284; /* tertiary text */
+  --color-line: #ddd3c2; /* hairline border */
+  --color-bronze: #9c7a46; /* accent */
+  --color-bronze-deep: #83653a; /* eyebrow / label accent */
+  --color-forest: #33432f; /* deep green accent */
+
+  /* ── Admin-only: semantic status tones ─────────────────────────────────
+     The storefront only ever needed forest / bronze-deep / muted. An admin has
+     to separate five order states at a glance and mark destructive actions
+     unmistakably, so we add a warm terracotta danger and a warm-leaning slate.
+     Both are chosen to sit beside bronze — no Tailwind reds or greens. */
+  --color-danger: #8f4034; /* destructive: delete, cancelled, blocked */
+  --color-danger-deep: #733227; /* danger hover */
+  --color-danger-tint: #f6e9e5; /* danger surface wash */
+  --color-success: #33432f; /* = forest; delivered, active */
+  --color-success-tint: #e7ebe4;
+  --color-warning: #83653a; /* = bronze-deep; processing, pending */
+  --color-warning-tint: #f2ead9;
+  --color-info: #3f4a55; /* shipped / in transit */
+  --color-info-tint: #e6e8ea;
+
+  /* ── Motion ────────────────────────────────────────────────────────────
+     One curve for everything, exposed so `ease-editorial` works as a utility.
+     The storefront hardcodes the literal cubic-bezier in JSX and drifted from
+     its own token; here, always use `ease-editorial`. */
+  --ease-editorial: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @layer base {
-  html, body {
+  html,
+  body {
     @apply h-full antialiased;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-inter), "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Display headings default to the serif, exactly as the storefront does. */
+  h1,
+  h2,
+  h3,
+  h4,
+  .font-display {
+    font-family: var(--font-cormorant), Georgia, "Times New Roman", serif;
+  }
+
+  ::selection {
+    background: #9c7a46;
+    color: #f5f0e8;
+  }
+
+  /* Keyboard focus is visible everywhere; mouse clicks stay clean. */
+  :focus-visible {
+    outline: 1px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+/* ── Editorial utilities (ported from the storefront) ─────────────────────── */
+
+/* Small uppercase tracked label — the system's connective tissue. */
+.eyebrow {
+  font-family: var(--font-inter), sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.6875rem; /* 11px */
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Denser eyebrow for table headers and chips, where 0.22em is too airy. */
+.eyebrow-tight {
+  font-family: var(--font-inter), sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 0.625rem; /* 10px */
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.link-underline {
+  position: relative;
+}
+.link-underline::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  width: 0;
+  height: 1px;
+  background: currentColor;
+  transition:
+    width 0.35s var(--ease-editorial),
+    left 0.35s var(--ease-editorial);
+}
+.link-underline:hover::after {
+  left: 0;
+  width: 100%;
+}
+
+.img-placeholder {
+  background: linear-gradient(135deg, #ece3d3 0%, #e2d7c3 50%, #e8dfd0 100%);
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Freeze the page behind an open dialog. The dashboard shell scrolls <main>
+   rather than <body>, so locking body alone leaves the background scrollable
+   under the scrim — Modal marks the root and this catches the real scroller. */
+.modal-open [data-scroll-container] {
+  overflow: hidden !important;
+}
+
+/* Thin warm scrollbar for the sidebar and long tables. */
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Admin-only: skeleton shimmer ─────────────────────────────────────────
+   Warm sand base with an ivory sweep, so loading reads as "Genesis waiting"
+   rather than a grey SaaS placeholder. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-sand);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(250, 246, 239, 0.65) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.6s var(--ease-editorial) infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }
