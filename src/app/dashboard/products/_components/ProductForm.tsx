@@ -20,6 +20,7 @@ import VariantEditor from './VariantEditor';
 import {
   CARE_ICONS,
   CARE_ICON_LABELS,
+  EDIT_SECTIONS,
   LANDING_PAGE_LIMIT,
   LIFE_MODES,
   MAX_IMAGES,
@@ -108,6 +109,8 @@ export default function ProductForm({
   const [keyFeatures, setKeyFeatures] = useState(product?.keyFeatures ?? '');
   const [garmentType, setGarmentType] = useState(product?.garmentType ?? '');
   const [collectionName, setCollectionName] = useState(product?.collectionName ?? '');
+  const [editSection, setEditSection] = useState(product?.editSection ?? '');
+  const [limited, setLimited] = useState(product?.limited ?? false);
   const [season, setSeason] = useState(product?.season ?? '');
   const [lifeMode, setLifeMode] = useState(product?.lifeMode ?? '');
   const [showOnLandingPage, setShowOnLandingPage] = useState(
@@ -333,6 +336,8 @@ export default function ProductForm({
     formData.append('collectionName', collectionName);
     formData.append('season', season);
     formData.append('lifeMode', lifeMode);
+    formData.append('editSection', editSection);
+    formData.append('limited', String(limited));
     formData.append('showOnLandingPage', String(showOnLandingPage));
 
     // ── Product detail page ────────────────────────────────────────────────
@@ -864,6 +869,26 @@ export default function ProductForm({
                 </Select>
               </Field>
 
+              <Field
+                label="The Edit Page"
+                htmlFor={`${uid}-edit-section`}
+                optional
+                hint="Places this piece on a THE EDIT sub-page."
+              >
+                <Select
+                  id={`${uid}-edit-section`}
+                  value={editSection}
+                  onChange={(e) => setEditSection(e.target.value)}
+                >
+                  <option value="">— None —</option>
+                  {EDIT_SECTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Collection" htmlFor={`${uid}-collection`} optional>
                   <Input
@@ -883,6 +908,15 @@ export default function ProductForm({
                     onChange={(e) => setSeason(e.target.value)}
                   />
                 </Field>
+              </div>
+
+              <div className="border border-line bg-cream p-4">
+                <Checkbox
+                  label="Limited piece"
+                  description="Shows a “LIMITED PIECE” tag on the product card."
+                  checked={limited}
+                  onChange={setLimited}
+                />
               </div>
 
               <div

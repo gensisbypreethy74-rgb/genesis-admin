@@ -75,6 +75,8 @@ export interface IProduct {
   collectionName?: string;
   season?: string;
   lifeMode?: string;
+  editSection?: string;
+  limited?: boolean;
 
   // ── Product detail page ──────────────────────────────────────────────────
   // All optional: the storefront omits a section rather than render an empty
@@ -99,6 +101,9 @@ export interface ICategory {
 
 /** Life modes drive the storefront's "Four Life Modes" section and ?mode= filtering. */
 export const LIFE_MODES = ['Ambition', 'Occasion', 'Casual/Out', 'At-Home Identity'];
+
+/** THE EDIT sub-pages a piece can be placed on (empty = not on any Edit page). */
+export const EDIT_SECTIONS = ['Within', 'Beyond', 'Genesis Men', 'Archive'];
 
 /**
  * The standard apparel size ladder, in wearing order, offered as quick-add chips

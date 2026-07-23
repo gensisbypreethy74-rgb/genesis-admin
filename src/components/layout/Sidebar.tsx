@@ -9,6 +9,8 @@ import {
   Layers,
   Package,
   Image as ImageIcon,
+  BookOpen,
+  Sparkles,
   Users,
   Mail,
   LogOut,
@@ -26,6 +28,8 @@ const ICONS = {
   categories: Layers,
   orders: Package,
   banners: ImageIcon,
+  moment: Sparkles,
+  story: BookOpen,
   customers: Users,
   newsletter: Mail,
 } as const;
