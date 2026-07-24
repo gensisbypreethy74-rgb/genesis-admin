@@ -170,12 +170,7 @@ export default function VariantEditor({
       </div>
 
       {variants.map((v, i) => {
-        // Live warning, as before: shown while typing, not only on submit.
-        const livePriceError = !!(v.oldPrice && v.oldPrice > 0 && v.oldPrice < v.price);
         const fieldErrors = errors?.[i];
-        const oldPriceError = livePriceError
-          ? 'Actual Price cannot be less than Offer Price'
-          : fieldErrors?.oldPrice;
         const imageCount = (v.images?.length || 0) + (v._files?.length || 0);
         const swatch = /^#[0-9a-fA-F]{6}$/.test(v.color || '')
           ? (v.color as string)
@@ -196,7 +191,7 @@ export default function VariantEditor({
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/*
                 Labelled "Size" but keyed `volume` — the cosmetics-era name the
                 schema still carries, because carts and historical orders
@@ -218,8 +213,10 @@ export default function VariantEditor({
                 />
               </Field>
 
+              {/* Single price. `oldPrice` is zeroed on every edit so no
+                  strikethrough MRP lingers from the old offer/actual split. */}
               <Field
-                label="Offer Price"
+                label="Price"
                 htmlFor={`${uid}-price-${i}`}
                 required
                 error={fieldErrors?.price}
@@ -227,25 +224,10 @@ export default function VariantEditor({
                 <Input
                   id={`${uid}-price-${i}`}
                   type="number"
-                  placeholder="₹ Offer"
+                  placeholder="₹ Price"
                   value={v.price ? v.price : ''}
-                  error={!!fieldErrors?.price || livePriceError}
-                  onChange={(e) => patch(i, { price: Number(e.target.value) })}
-                />
-              </Field>
-
-              <Field
-                label="Actual Price"
-                htmlFor={`${uid}-old-price-${i}`}
-                error={oldPriceError}
-              >
-                <Input
-                  id={`${uid}-old-price-${i}`}
-                  type="number"
-                  placeholder="₹ Actual"
-                  value={v.oldPrice ? v.oldPrice : ''}
-                  error={!!oldPriceError}
-                  onChange={(e) => patch(i, { oldPrice: Number(e.target.value) })}
+                  error={!!fieldErrors?.price}
+                  onChange={(e) => patch(i, { price: Number(e.target.value), oldPrice: 0 })}
                 />
               </Field>
             </div>
