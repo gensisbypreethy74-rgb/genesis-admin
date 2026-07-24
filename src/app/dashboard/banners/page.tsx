@@ -29,8 +29,11 @@ import { api, apiErrorMessage } from '@/lib/api';
 
 interface IBanner {
   _id: string;
+  eyebrow?: string;
   title: string;
   description: string;
+  ctaLabel?: string;
+  ctaHref?: string;
   image: string;
   mobileImage?: string;
   status: string;
@@ -54,8 +57,10 @@ export default function BannersPage() {
   // Form State. `image`/`mobileImage` hold an existing path from the API;
   // `imageFile`/`mobileImageFile` hold a freshly-picked File. Exactly one of
   // each pair is live at a time — that distinction drives what goes on the wire.
+  const [eyebrow, setEyebrow] = useState('');
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [ctaLabel, setCtaLabel] = useState('');
+  const [ctaHref, setCtaHref] = useState('');
   const [image, setImage] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [mobileImage, setMobileImage] = useState('');
@@ -93,8 +98,10 @@ export default function BannersPage() {
 
   const handleAddClick = () => {
     setEditingId(null);
+    setEyebrow('');
     setTitle('');
-    setDescription('');
+    setCtaLabel('');
+    setCtaHref('');
     setImage('');
     setImageFile(null);
     setMobileImage('');
@@ -105,8 +112,10 @@ export default function BannersPage() {
 
   const handleEditClick = (banner: IBanner) => {
     setEditingId(banner._id);
+    setEyebrow(banner.eyebrow || '');
     setTitle(banner.title);
-    setDescription(banner.description);
+    setCtaLabel(banner.ctaLabel || '');
+    setCtaHref(banner.ctaHref || '');
     setImage(banner.image);
     setImageFile(null);
     setMobileImage(banner.mobileImage || '');
@@ -146,11 +155,10 @@ export default function BannersPage() {
   const handleSubmit = async () => {
     if (
       !title ||
-      !description ||
       (!image && !imageFile) ||
       (!mobileImage && !mobileImageFile)
     ) {
-      toast.error('Title, description, and both images are required');
+      toast.error('Heading and both images are required');
       return;
     }
 
@@ -167,8 +175,10 @@ export default function BannersPage() {
     setSaving(true);
 
     const formData = new FormData();
+    formData.append('eyebrow', eyebrow);
     formData.append('title', title);
-    formData.append('description', description);
+    formData.append('ctaLabel', ctaLabel);
+    formData.append('ctaHref', ctaHref);
     formData.append('status', isActive ? 'ACTIVE' : 'INACTIVE');
 
     if (imageFile) {
@@ -202,6 +212,13 @@ export default function BannersPage() {
       }
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Error connecting to backend'));
+      // 404 = the banner was removed elsewhere. Retrying the same id can only
+      // 404 again, so drop the dead editor and resync rather than stranding
+      // the operator on a row that no longer exists.
+      if ((err as { response?: { status?: number } })?.response?.status === 404) {
+        handleClosePanel();
+      }
+      fetchBanners();
     } finally {
       setSaving(false);
     }
@@ -226,6 +243,9 @@ export default function BannersPage() {
       }
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Error deleting banner'));
+      // Already gone (404) or the call failed — either way the list is stale.
+      setDeleteModal({ isOpen: false, bannerId: null });
+      fetchBanners();
     } finally {
       setDeleting(false);
     }
@@ -235,12 +255,10 @@ export default function BannersPage() {
     <div className="pb-4">
       <PageHeader
         eyebrow="Storefront"
-        title="Banners"
-        description="The rotating hero imagery on the homepage. Each banner carries a wide crop for desktop and a tall crop for phones."
+        title="Hero Section"
+        description="The homepage hero: heading, subheading and imagery. The newest active entry is what the storefront shows — a wide crop for desktop, a tall crop for phones."
         action={
-          <Button variant="solid" size="sm" onClick={handleAddClick}>
-            Add Banner
-          </Button>
+          <Button variant="solid" size="sm" onClick={handleAddClick}>Add Hero</Button>
         }
       />
 
@@ -251,13 +269,11 @@ export default function BannersPage() {
             <SkeletonTable rows={4} cols={5} />
           ) : banners.length === 0 ? (
             <EmptyState
-              title="No banners yet"
-              message="Add a banner to fill the homepage hero. You'll need a desktop crop and a mobile crop."
+              title="No hero set"
+              message="Add a hero to set the homepage heading, subheading and imagery. You'll need a desktop crop and a mobile crop."
               icon={<ImageIcon size={18} aria-hidden />}
               action={
-                <Button variant="solid" size="sm" onClick={handleAddClick}>
-                  Add Banner
-                </Button>
+                <Button variant="solid" size="sm" onClick={handleAddClick}>Add Hero</Button>
               }
             />
           ) : (
@@ -336,7 +352,7 @@ export default function BannersPage() {
             <div className="p-5 sm:p-6 border-b border-line shrink-0">
               <CardHeader
                 eyebrow={editingId ? 'Editing' : 'Create'}
-                title={editingId ? 'Edit Banner' : 'New Banner'}
+                title={editingId ? 'Edit Hero' : 'New Hero'}
                 action={
                   <IconButton label="Close panel" onClick={handleClosePanel}>
                     <X size={14} />
@@ -346,25 +362,55 @@ export default function BannersPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto thin-scrollbar p-5 sm:p-6 space-y-5">
-              <Field label="Banner Title" htmlFor="banner-title" required>
+              <Field
+                label="Section label"
+                htmlFor="banner-eyebrow"
+                hint="Small uppercase line above the heading."
+              >
+                <Input
+                  id="banner-eyebrow"
+                  type="text"
+                  value={eyebrow}
+                  onChange={(e) => setEyebrow(e.target.value)}
+                  placeholder="Genesis by Preethy · The Edit"
+                />
+              </Field>
+
+              <Field
+                label="Hero heading"
+                htmlFor="banner-title"
+                required
+                hint="The large serif headline on the homepage hero."
+              >
                 <Input
                   id="banner-title"
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Autumn Edit"
+                  placeholder="Tropical-intelligent clothing, drawn from a life lived in heat, humidity and rain."
                 />
               </Field>
 
-              <Field label="Description" htmlFor="banner-description" required>
-                <Input
-                  id="banner-description"
-                  type="text"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Hand-finished pieces for the season"
-                />
-              </Field>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Button text" htmlFor="banner-cta-label" hint="e.g. Explore the Edit">
+                  <Input
+                    id="banner-cta-label"
+                    type="text"
+                    value={ctaLabel}
+                    onChange={(e) => setCtaLabel(e.target.value)}
+                    placeholder="Explore the Edit"
+                  />
+                </Field>
+                <Field label="Button link" htmlFor="banner-cta-href" hint="e.g. /products?collection=onam">
+                  <Input
+                    id="banner-cta-href"
+                    type="text"
+                    value={ctaHref}
+                    onChange={(e) => setCtaHref(e.target.value)}
+                    placeholder="/products?collection=onam"
+                  />
+                </Field>
+              </div>
 
               {/* Two pickers, two distinct fields — the storefront picks between
                   them by viewport, so both are required. */}
@@ -409,7 +455,7 @@ export default function BannersPage() {
                 loading={saving}
                 className="w-full"
               >
-                {editingId ? 'Update Banner' : 'Create Banner'}
+                {editingId ? 'Update Hero' : 'Create Hero'}
               </Button>
             </div>
           </Card>

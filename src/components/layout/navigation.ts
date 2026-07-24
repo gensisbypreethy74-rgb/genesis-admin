@@ -14,6 +14,8 @@ export type NavKey =
   | 'orders'
   | 'banners'
   | 'moment'
+  | 'founder'
+  | 'studio-notes'
   | 'story'
   | 'customers'
   | 'newsletter';
@@ -62,9 +64,9 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     key: 'banners',
-    name: 'Banners',
+    name: 'Hero Section',
     href: '/dashboard/banners',
-    title: 'Banners',
+    title: 'Hero Section',
     eyebrow: 'Storefront',
   },
   {
@@ -72,6 +74,20 @@ export const NAV_ITEMS: NavItem[] = [
     name: 'The Moment',
     href: '/dashboard/moment',
     title: 'The Moment',
+    eyebrow: 'Storefront',
+  },
+  {
+    key: 'founder',
+    name: "Founder's Note",
+    href: '/dashboard/founder',
+    title: "Founder's Note",
+    eyebrow: 'Storefront',
+  },
+  {
+    key: 'studio-notes',
+    name: 'Studio Notes',
+    href: '/dashboard/studio-notes',
+    title: 'Studio Notes',
     eyebrow: 'Storefront',
   },
   {
