@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   CardHeader,
+  Textarea,
   Checkbox,
   ConfirmDialog,
   EmptyState,
@@ -56,6 +57,67 @@ export default function CategoriesPage() {
   const [image, setImage] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [status, setStatus] = useState('ACTIVE');
+
+  // THE EDIT: four fixed categories — only their optional descriptions edit.
+  const [editSections, setEditSections] = useState<Record<string, string> | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  useEffect(() => {
+    api
+      .get('/edit-sections')
+      .then((r) => { if (r.data?.success) setEditSections(r.data.data); })
+      .catch(() => {});
+  }, []);
+
+  const saveEditSections = async () => {
+    if (!editSections) return;
+    setSavingEdit(true);
+    try {
+      const res = await api.put('/edit-sections', editSections);
+      if (res.data?.success) {
+        setEditSections(res.data.data);
+        toast.success('Descriptions saved');
+      }
+    } catch (e) {
+      toast.error(apiErrorMessage(e, 'Could not save descriptions.'));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // Homepage "The Edit" category-grid header (label, heading, Shop All button).
+  const [catSection, setCatSection] = useState<Record<string, string> | null>(null);
+  const [savingCatSection, setSavingCatSection] = useState(false);
+
+  useEffect(() => {
+    api
+      .get('/category-section')
+      .then((r) => { if (r.data?.success) setCatSection(r.data.data); })
+      .catch(() => {});
+  }, []);
+
+  const setCat = (k: string, v: string) =>
+    setCatSection((p) => ({ ...(p || {}), [k]: v }));
+
+  const saveCatSection = async () => {
+    if (!catSection) return;
+    if (!(catSection.heading || '').trim()) {
+      toast.error('A section heading is required.');
+      return;
+    }
+    setSavingCatSection(true);
+    try {
+      const res = await api.put('/category-section', catSection);
+      if (res.data?.success) {
+        setCatSection(res.data.data);
+        toast.success('Category section saved');
+      }
+    } catch (e) {
+      toast.error(apiErrorMessage(e, 'Could not save the category section.'));
+    } finally {
+      setSavingCatSection(false);
+    }
+  };
 
   const fetchCategories = async () => {
     try {
@@ -189,6 +251,71 @@ export default function CategoriesPage() {
           </Button>
         }
       />
+
+      {/* Homepage "The Edit" category-grid header */}
+      <Reveal>
+        <Card className="p-5 sm:p-6 mb-6">
+          <CardHeader eyebrow="Homepage" title="Category section header" />
+          <p className="font-sans text-[13px] text-muted mt-1 mb-4 max-w-2xl">
+            The label, heading and “Shop All” button above the category grid on the homepage.
+          </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Field label="Section label" htmlFor="cs-eyebrow" hint="Small uppercase line.">
+              <Input id="cs-eyebrow" value={catSection?.eyebrow ?? ''} onChange={(e) => setCat('eyebrow', e.target.value)} placeholder="The Edit" />
+            </Field>
+            <Field label="Section heading" htmlFor="cs-heading" required>
+              <Input id="cs-heading" value={catSection?.heading ?? ''} onChange={(e) => setCat('heading', e.target.value)} placeholder="Find your way in." />
+            </Field>
+            <Field label="Button text" htmlFor="cs-shop-label">
+              <Input id="cs-shop-label" value={catSection?.shopLabel ?? ''} onChange={(e) => setCat('shopLabel', e.target.value)} placeholder="Shop All" />
+            </Field>
+            <Field label="Button link" htmlFor="cs-shop-href" hint="e.g. /products">
+              <Input id="cs-shop-href" value={catSection?.shopHref ?? ''} onChange={(e) => setCat('shopHref', e.target.value)} placeholder="/products" />
+            </Field>
+          </div>
+          <div className="mt-4">
+            <Button variant="solid" size="sm" onClick={saveCatSection} loading={savingCatSection}>
+              Save section
+            </Button>
+          </div>
+        </Card>
+      </Reveal>
+
+      {/* THE EDIT — four fixed categories, description-only (no add/rename/delete/reorder) */}
+      <Reveal>
+        <Card className="p-5 sm:p-6 mb-6">
+          <CardHeader eyebrow="The Edit · Fixed" title="THE EDIT categories" />
+          <p className="font-sans text-[13px] text-muted mt-1 mb-4 max-w-2xl">
+            These four are fixed and cannot be added to, renamed, reordered or removed. Edit each
+            optional description below — leave one blank to hide it on that category page.
+          </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {[
+              { key: 'within', label: 'Within', note: 'Casual / Homewear' },
+              { key: 'beyond', label: 'Beyond', note: 'Occasionwear' },
+              { key: 'genesisMen', label: 'Genesis Men', note: "Men's Collection" },
+              { key: 'archive', label: 'Archive', note: 'Past Collections' },
+            ].map((c) => (
+              <Field key={c.key} label={`${c.label} — ${c.note}`} htmlFor={`es-${c.key}`}>
+                <Textarea
+                  id={`es-${c.key}`}
+                  rows={3}
+                  value={editSections?.[c.key] ?? ''}
+                  onChange={(e) =>
+                    setEditSections((p) => ({ ...(p || {}), [c.key]: e.target.value }))
+                  }
+                  placeholder="Optional description shown on the category page…"
+                />
+              </Field>
+            ))}
+          </div>
+          <div className="mt-4">
+            <Button variant="solid" size="sm" onClick={saveEditSections} loading={savingEdit}>
+              Save descriptions
+            </Button>
+          </div>
+        </Card>
+      </Reveal>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Catalog */}

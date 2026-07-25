@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { Plus, X } from 'lucide-react';
@@ -103,7 +104,7 @@ export default function ProductForm({
   // Default to the first active category, as before — but derived rather than
   // seeded, so the submitted value always matches what the select is showing
   // even if the categories arrived after the drawer was opened.
-  const effectiveCategory = category || (activeCategories[0]?.name ?? '');
+  const effectiveCategory = category || activeCategories[0]?.name || EDIT_SECTIONS[0];
   const [description, setDescription] = useState(product?.description ?? '');
   const [offerText, setOfferText] = useState(product?.offerText ?? '');
   const [keyFeatures, setKeyFeatures] = useState(product?.keyFeatures ?? '');
@@ -173,11 +174,17 @@ export default function ProductForm({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Lock background scroll for as long as the drawer is mounted.
+  // Lock background scroll for as long as the drawer is mounted. The admin's
+  // real scroller is <main data-scroll-container>, not <body> — so flag the
+  // document and let globals.css freeze the marked container (same mechanism
+  // as Modal). Setting body.overflow alone was a no-op inside the dashboard.
   useEffect(() => {
+    const root = document.documentElement;
     const previous = document.body.style.overflow;
+    root.classList.add('modal-open');
     document.body.style.overflow = 'hidden';
     return () => {
+      root.classList.remove('modal-open');
       document.body.style.overflow = previous;
     };
   }, []);
@@ -407,7 +414,11 @@ export default function ProductForm({
   const landingLimitReached = otherLandingCount >= LANDING_PAGE_LIMIT && !showOnLandingPage;
   const title = product ? 'Edit Piece' : 'Add Piece';
 
-  return (
+  // Portaled to <body> so this full-viewport drawer is never nested in — and so
+  // never adds scroll height to, or is clipped by — whichever page embeds the
+  // pieces manager (the Moment page renders it deep inside the scrolling <main>).
+  if (typeof document === 'undefined') return null;
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
       <motion.div
         initial={{ opacity: 0 }}
@@ -481,14 +492,19 @@ export default function ProductForm({
                   error={!!errors.category}
                   onChange={(e) => setCategory(e.target.value)}
                 >
-                  {activeCategories.map((c) => (
-                    <option key={c._id} value={c.name}>
-                      {c.name}
+                  {/* Fixed THE EDIT categories — always present, always first. */}
+                  {EDIT_SECTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
                     </option>
                   ))}
-                  {activeCategories.length === 0 && (
-                    <option value="">No Active Categories</option>
-                  )}
+                  {activeCategories
+                    .filter((c) => !EDIT_SECTIONS.includes(c.name))
+                    .map((c) => (
+                      <option key={c._id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
                 </Select>
               </Field>
 
@@ -950,6 +966,7 @@ export default function ProductForm({
           </div>
         </form>
       </motion.aside>
-    </div>
+    </div>,
+    document.body
   );
 }

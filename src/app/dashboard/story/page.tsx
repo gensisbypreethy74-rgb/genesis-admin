@@ -45,6 +45,7 @@ export default function StoryPage() {
   const [slug, setSlug] = useState('story');
   const [introEyebrow, setIntroEyebrow] = useState('');
   const [introHeading, setIntroHeading] = useState('');
+  const [introDescription, setIntroDescription] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -59,6 +60,7 @@ export default function StoryPage() {
         setSlug(s.slug || 'story');
         setIntroEyebrow(s.introEyebrow || '');
         setIntroHeading(s.introHeading || '');
+        setIntroDescription(s.introDescription || '');
       }
     } catch (e) {
       toast.error(apiErrorMessage(e, 'Could not load the Story page.'));
@@ -148,6 +150,7 @@ export default function StoryPage() {
         slug,
         introEyebrow,
         introHeading,
+        introDescription,
       });
       if (res.data?.success) {
         setSettings(res.data.data);
@@ -198,8 +201,11 @@ export default function StoryPage() {
           <Field label="Intro eyebrow" htmlFor="s-intro-eyebrow">
             <Input id="s-intro-eyebrow" value={introEyebrow} onChange={(e) => setIntroEyebrow(e.target.value)} placeholder="Story · Genesis by Preethy" />
           </Field>
-          <Field label="Intro heading" htmlFor="s-intro-heading" hint="Optional H1 at the top of the page.">
-            <Input id="s-intro-heading" value={introHeading} onChange={(e) => setIntroHeading(e.target.value)} placeholder="Four sides of one house." />
+          <Field label="Intro heading" htmlFor="s-intro-heading" hint="The H1 at the top of the page.">
+            <Input id="s-intro-heading" value={introHeading} onChange={(e) => setIntroHeading(e.target.value)} placeholder="Clothing for the adult who has stopped dressing to impress." />
+          </Field>
+          <Field label="Intro description" htmlFor="s-intro-desc" className="lg:col-span-2" hint="The paragraph under the intro heading.">
+            <Textarea id="s-intro-desc" rows={2} value={introDescription} onChange={(e) => setIntroDescription(e.target.value)} placeholder="Genesis by Preethy is natural clothing for tropical climates, made in Kochi, Kerala — and for a life that no longer needs to perform." />
           </Field>
         </div>
         <div className="mt-5">

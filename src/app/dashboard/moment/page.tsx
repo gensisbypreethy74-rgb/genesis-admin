@@ -23,6 +23,7 @@ export default function MomentPage() {
   const [m, setM] = useState<Moment | null>(null);
   const [catalogue, setCatalogue] = useState<CatalogueProduct[]>([]);
   const [saving, setSaving] = useState(false);
+  const [showPieces, setShowPieces] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -183,14 +184,27 @@ export default function MomentPage() {
         <div className="mt-5"><Button variant="solid" size="sm" onClick={save} loading={saving}>Save</Button></div>
       </Card>
 
-      {/* Full piece management — the same catalogue + form as the Pieces page. */}
+      {/* Full piece management — the same catalogue + form as the Pieces page.
+          Collapsed by default so it doesn't stretch this page into a long scroll;
+          expands on demand. */}
       <div className="mt-8">
-        <p className="eyebrow text-bronze-deep mb-1">The Edit</p>
-        <h2 className="font-display text-2xl text-ink mb-1">Manage Pieces</h2>
-        <p className="font-sans text-[13px] text-muted mb-4">
-          Add, edit or remove any garment. Then assign it to the carousel above.
-        </p>
-        <PiecesManager onChanged={refreshCatalogue} />
+        <div className="flex items-end justify-between gap-3 flex-wrap">
+          <div>
+            <p className="eyebrow text-bronze-deep mb-1">The Edit</p>
+            <h2 className="font-display text-2xl text-ink mb-1">Manage Pieces</h2>
+            <p className="font-sans text-[13px] text-muted">
+              Add, edit or remove any garment. Then assign it to the carousel above.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowPieces((v) => !v)}>
+            {showPieces ? 'Hide pieces' : 'Manage pieces'}
+          </Button>
+        </div>
+        {showPieces && (
+          <div className="mt-4">
+            <PiecesManager onChanged={refreshCatalogue} />
+          </div>
+        )}
       </div>
     </div>
   );

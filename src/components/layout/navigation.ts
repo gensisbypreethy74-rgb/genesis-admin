@@ -16,7 +16,6 @@ export type NavKey =
   | 'moment'
   | 'founder'
   | 'studio-notes'
-  | 'category-section'
   | 'story'
   | 'customers'
   | 'newsletter';
@@ -82,13 +81,6 @@ export const NAV_ITEMS: NavItem[] = [
     name: "Founder's Note",
     href: '/dashboard/founder',
     title: "Founder's Note",
-    eyebrow: 'Storefront',
-  },
-  {
-    key: 'category-section',
-    name: 'Category Section',
-    href: '/dashboard/category-section',
-    title: 'Category Section',
     eyebrow: 'Storefront',
   },
   {

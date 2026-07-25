@@ -42,6 +42,7 @@ export interface IStorySettings {
   slug?: string;
   introEyebrow?: string;
   introHeading?: string;
+  introDescription?: string;
 }
 
 /** The section kinds the admin can add, with studio-facing labels + guidance. */
