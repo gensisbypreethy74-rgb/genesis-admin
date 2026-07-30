@@ -60,11 +60,34 @@ export const CARE_ICON_LABELS: Record<CareIcon, string> = {
   'dry-clean': 'Dry Clean',
 };
 
+/**
+ * One row of the per-product size chart. Measurements are CENTIMETRES only —
+ * the storefront derives inches at render time, so the studio never enters or
+ * maintains a second set of numbers.
+ */
+export interface ISizeChartRow {
+  size: string;
+  bust?: number;
+  waist?: number;
+  hip?: number;
+  length?: number;
+}
+
+/** The size-chart measurement columns, in the order the table renders them. */
+export const SIZE_CHART_FIELDS = [
+  { key: 'bust', label: 'Bust' },
+  { key: 'waist', label: 'Waist' },
+  { key: 'hip', label: 'Hip' },
+  { key: 'length', label: 'Length' },
+] as const;
+
+export type SizeChartField = (typeof SIZE_CHART_FIELDS)[number]['key'];
+
 export interface IProduct {
   _id: string;
   name: string;
   category: string;
-  description: string;
+  description?: string;
   variants: IVariant[];
   offerText?: string;
   keyFeatures?: string;
@@ -77,6 +100,7 @@ export interface IProduct {
   lifeMode?: string;
   editSection?: string;
   limited?: boolean;
+  materials?: string[];
 
   // ── Product detail page ──────────────────────────────────────────────────
   // All optional: the storefront omits a section rather than render an empty
@@ -87,6 +111,7 @@ export interface IProduct {
   studioNotes?: string;
   materialText?: string;
   specs?: ISpec[];
+  sizeChart?: ISizeChartRow[];
   fitFooter?: string;
   careIcons?: CareIcon[];
   careText?: string;
@@ -106,6 +131,15 @@ export const LIFE_MODES = ['Ambition', 'Occasion', 'Casual/Out', 'At-Home Identi
 export const EDIT_SECTIONS = ['Within', 'Beyond', 'Genesis Men', 'Archive'];
 
 /**
+ * The Moment — a fixed category offered alongside EDIT_SECTIONS, so it is always
+ * selectable whether or not the studio has created a matching entry under
+ * Categories. Filing a piece here publishes it to The Moment's product surfaces
+ * on its own; no second step on the Moment page. Mirrored by `MOMENT_CATEGORY`
+ * in the storefront's lib/product.ts — the string is the contract between them.
+ */
+export const MOMENT_CATEGORY = 'The Moment';
+
+/**
  * The standard apparel size ladder, in wearing order, offered as quick-add chips
  * in the variant editor. A size the studio picks becomes a variant whose
  * `volume` is this label — the storefront renders one selectable button per
@@ -116,9 +150,6 @@ export const SIZE_PRESETS = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'] as const;
 
 /** Uploads allowed per product, and per variant. */
 export const MAX_IMAGES = 5;
-
-/** Products that may be featured on the storefront landing page. */
-export const LANDING_PAGE_LIMIT = 5;
 
 /** Per-variant validation messages, keyed by variant index in `ProductForm`. */
 export interface VariantFieldErrors {

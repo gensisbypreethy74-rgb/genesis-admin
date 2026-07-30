@@ -16,20 +16,22 @@ import {
   Select,
   Textarea,
 } from '@/components/ui';
-import { isUsableImageRef } from '@/components/ui/Thumb';
 import VariantEditor from './VariantEditor';
 import {
   CARE_ICONS,
   CARE_ICON_LABELS,
   EDIT_SECTIONS,
-  LANDING_PAGE_LIMIT,
+  MOMENT_CATEGORY,
   LIFE_MODES,
   MAX_IMAGES,
+  SIZE_CHART_FIELDS,
   type CareIcon,
   type ICategory,
   type IProduct,
+  type ISizeChartRow,
   type ISpec,
   type IVariant,
+  type SizeChartField,
   type VariantFieldErrors,
 } from './types';
 
@@ -46,7 +48,7 @@ import {
  * `api` client attaches auth and handles 401/403, and axios sets the multipart
  * boundary.
  *
- * The product detail page fields are appended after `showOnLandingPage`. They're
+ * The product detail page fields are appended after `editSection`. They're
  * all optional but are sent even when blank, because the backend updates with
  * `findByIdAndUpdate` — a key that isn't in the request is left alone, so
  * omitting an emptied field would make it impossible to ever clear one.
@@ -57,12 +59,76 @@ import {
 
 interface FormErrors {
   name?: string;
-  description?: string;
   category?: string;
-  imageUrls?: string;
   variants?: string;
   variantFields?: Record<number, VariantFieldErrors>;
 }
+
+/**
+ * A size-chart row while it is being edited: every cell a string, because a
+ * controlled number input the user is halfway through typing into is a string.
+ */
+type SizeChartDraft = Record<'size' | SizeChartField, string>;
+
+const EMPTY_SIZE_ROW: SizeChartDraft = {
+  size: '',
+  bust: '',
+  waist: '',
+  hip: '',
+  length: '',
+};
+
+const toDraft = (row: ISizeChartRow): SizeChartDraft => ({
+  size: row.size ?? '',
+  bust: row.bust?.toString() ?? '',
+  waist: row.waist?.toString() ?? '',
+  hip: row.hip?.toString() ?? '',
+  length: row.length?.toString() ?? '',
+});
+
+/**
+ * Drafts → the payload rows, dropping anything the storefront could not draw:
+ * a row with no size label has no leftmost cell to sit under, and a row with a
+ * label but not one usable measurement is an empty line in the table. Blank and
+ * non-numeric cells are omitted rather than coerced — `Number('')` is 0, which
+ * would publish a 0 cm bust.
+ */
+const toSizeChartPayload = (drafts: SizeChartDraft[]): ISizeChartRow[] =>
+  drafts.reduce<ISizeChartRow[]>((rows, draft) => {
+    const size = draft.size.trim();
+    if (!size) return rows;
+
+    const row: ISizeChartRow = { size };
+    for (const { key } of SIZE_CHART_FIELDS) {
+      const raw = draft[key].trim();
+      if (!raw) continue;
+      const cm = Number(raw);
+      if (Number.isFinite(cm) && cm > 0) row[key] = cm;
+    }
+
+    return SIZE_CHART_FIELDS.some(({ key }) => row[key] !== undefined)
+      ? [...rows, row]
+      : rows;
+  }, []);
+
+/**
+ * "Cotton, Linen , cotton" → ['Cotton', 'Linen'].
+ *
+ * Deduped case-insensitively but stored with the studio's own casing, so
+ * "100% Cotton" survives intact instead of being title-cased into nonsense.
+ * The storefront's Material filter groups by a slug of these, so a stray
+ * "cotton" on another piece still lands in the same filter option.
+ */
+const toMaterialsPayload = (raw: string): string[] => {
+  const seen = new Set<string>();
+  return raw.split(',').reduce<string[]>((out, part) => {
+    const label = part.trim().replace(/\s+/g, ' ');
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) return out;
+    seen.add(key);
+    return [...out, label];
+  }, []);
+};
 
 /** Hairline-ruled group with an eyebrow label. */
 function Section({ label, children }: { label: string; children: ReactNode }) {
@@ -77,15 +143,12 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 export default function ProductForm({
   product,
   categories,
-  otherLandingCount,
   onClose,
   onSaved,
 }: {
   /** null → creating a new piece. */
   product: IProduct | null;
   categories: ICategory[];
-  /** Pieces already on the landing page, excluding the one being edited. */
-  otherLandingCount: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -105,18 +168,28 @@ export default function ProductForm({
   // seeded, so the submitted value always matches what the select is showing
   // even if the categories arrived after the drawer was opened.
   const effectiveCategory = category || activeCategories[0]?.name || EDIT_SECTIONS[0];
-  const [description, setDescription] = useState(product?.description ?? '');
-  const [offerText, setOfferText] = useState(product?.offerText ?? '');
+  // The fixed options (the four Edit pages, then The Moment), then every active
+  // studio category. The piece's own category is appended when it isn't in any
+  // of those — a category that was deactivated, renamed or deleted after the
+  // piece was filed would otherwise leave the Select with no matching <option>,
+  // so it would display the first one and silently refile the piece on save.
+  const categoryOptions = [
+    ...new Set([
+      ...EDIT_SECTIONS,
+      MOMENT_CATEGORY,
+      ...activeCategories.map((c) => c.name),
+      effectiveCategory,
+    ]),
+  ];
   const [keyFeatures, setKeyFeatures] = useState(product?.keyFeatures ?? '');
   const [garmentType, setGarmentType] = useState(product?.garmentType ?? '');
   const [collectionName, setCollectionName] = useState(product?.collectionName ?? '');
   const [editSection, setEditSection] = useState(product?.editSection ?? '');
-  const [limited, setLimited] = useState(product?.limited ?? false);
-  const [season, setSeason] = useState(product?.season ?? '');
+  // Held as the raw comma-separated string so a trailing comma mid-typing is
+  // just text; it splits into the array once, on submit.
+  const [materials, setMaterials] = useState((product?.materials ?? []).join(', '));
   const [lifeMode, setLifeMode] = useState(product?.lifeMode ?? '');
-  const [showOnLandingPage, setShowOnLandingPage] = useState(
-    product?.showOnLandingPage ?? false
-  );
+  const [season, setSeason] = useState(product?.season ?? '');
 
   // ── Product detail page copy ────────────────────────────────────────────
   // Seeded from `product` in the initialiser like everything else here — the
@@ -131,6 +204,13 @@ export default function ProductForm({
   // pre-filled "Length / Shoulder" placeholders would get saved as-is.
   const [specs, setSpecs] = useState<ISpec[]>(() =>
     (product?.specs ?? []).map((s) => ({ label: s.label, value: s.value }))
+  );
+  // Size chart rows are held as strings, not numbers, so a half-typed cell
+  // ("9", mid-way to "94") stays exactly what was typed instead of being
+  // round-tripped through Number() on every keystroke. They convert once, on
+  // submit. Values are centimetres — the storefront derives inches.
+  const [sizeChart, setSizeChart] = useState<SizeChartDraft[]>(() =>
+    (product?.sizeChart ?? []).map(toDraft)
   );
   const [fitFooter, setFitFooter] = useState(product?.fitFooter ?? '');
   // Filtering the saved list through CARE_ICONS drops anything the storefront
@@ -147,23 +227,46 @@ export default function ProductForm({
     product ? product.images.map((url) => assetUrl(url)).join(', ') : ''
   );
   const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [variants, setVariants] = useState<IVariant[]>(() =>
-    product
-      ? // Deep copy so editing never mutates the row in the list behind us.
-        product.variants.map((v) => ({
-          volume: v.volume,
-          price: v.price,
-          oldPrice: v.oldPrice,
-          color: v.color || '',
-          images: [...(v.images || [])],
-          _files: [],
-        }))
-      : // Size starts empty, not '1'. That default is a leftover from the
-        // cosmetics schema (where `volume` meant "100ml"); on a garment it
-        // silently saved "1" as the size. Validation requires a size, so an
-        // empty seed forces a real one rather than shipping a bogus default.
-        [{ volume: '', price: 0, oldPrice: 0, color: '', images: [], _files: [] }]
-  );
+  const [variants, setVariants] = useState<IVariant[]>(() => {
+    if (!product) {
+      // Size starts empty, not '1'. That default is a leftover from the
+      // cosmetics schema (where `volume` meant "100ml"); on a garment it
+      // silently saved "1" as the size. Validation requires a size, so an
+      // empty seed forces a real one rather than shipping a bogus default.
+      return [{ volume: '', price: 0, oldPrice: 0, color: '', images: [], _files: [] }];
+    }
+
+    // Deep copy so editing never mutates the row in the list behind us.
+    const rows = product.variants.map((v) => ({
+      volume: v.volume,
+      price: v.price,
+      oldPrice: v.oldPrice,
+      color: v.color || '',
+      images: [...(v.images || [])],
+      _files: [] as File[],
+    }));
+
+    // Only the first variant carries imagery now. A product saved under the old
+    // per-variant model may have photos spread across sizes, and those sizes no
+    // longer render a picker — so fold them onto the first row rather than
+    // stranding them somewhere invisible and unremovable. Deduped by URL, since
+    // the same photo was often uploaded to every size. Nothing is dropped: the
+    // storefront pools the whole set into one gallery either way.
+    const [first, ...rest] = rows;
+    if (first) {
+      const seen = new Set(first.images);
+      for (const row of rest) {
+        for (const url of row.images) {
+          if (seen.has(url)) continue;
+          seen.add(url);
+          first.images.push(url);
+        }
+        row.images = [];
+      }
+    }
+
+    return rows;
+  });
 
   // Escape to close.
   useEffect(() => {
@@ -200,8 +303,12 @@ export default function ProductForm({
   }, []);
 
   // ── Product-level imagery ───────────────────────────────────────────────
-  // The URL list and the upload list are two halves of one gallery. The cap of
-  // five applies to uploads only, as it always has.
+  // `imageUrls` is no longer typed into — it exists purely so a piece's already
+  // stored images survive a save. They render as tiles, can be cleared or
+  // swapped for an upload, and are re-posted as `images` on submit. Drop this
+  // round-trip and every edit would wipe the gallery, since the backend $sets
+  // whatever `images` it receives.
+  // The cap of five applies to uploads only, as it always has.
   const urlList = imageUrls.split(',').map((url) => url.trim()).filter((url) => url);
 
   const setUrlList = (next: string[]) => setImageUrls(next.join(', '));
@@ -240,6 +347,15 @@ export default function ProductForm({
   const removeSpec = (index: number) =>
     setSpecs((prev) => prev.filter((_, i) => i !== index));
 
+  // ── Size chart rows (centimetres) ───────────────────────────────────────
+  const patchSizeRow = (index: number, changes: Partial<SizeChartDraft>) =>
+    setSizeChart((prev) => prev.map((r, i) => (i === index ? { ...r, ...changes } : r)));
+
+  const addSizeRow = () => setSizeChart((prev) => [...prev, { ...EMPTY_SIZE_ROW }]);
+
+  const removeSizeRow = (index: number) =>
+    setSizeChart((prev) => prev.filter((_, i) => i !== index));
+
   /** Toggle one care symbol, keeping the stored order equal to CARE_ICONS'. */
   const toggleCareIcon = (icon: CareIcon, checked: boolean) =>
     setCareIcons((prev) =>
@@ -260,10 +376,9 @@ export default function ProductForm({
       if (!message) message = m;
     };
 
-    if (!name.trim() || !description.trim()) {
-      if (!name.trim()) found.name = 'Required.';
-      if (!description.trim()) found.description = 'Required.';
-      fail('Name and description are required.');
+    if (!name.trim()) {
+      found.name = 'Required.';
+      fail('Name is required.');
     }
     if (!effectiveCategory) {
       found.category = 'Required.';
@@ -295,16 +410,12 @@ export default function ProductForm({
       if (Object.keys(vf).length > 0) found.variantFields![i] = vf;
     });
 
-    // The URL field is free text and its entries lead the gallery, so anything
-    // unloadable typed here became the piece's thumbnail — that's how
-    // "GOOGLE.COM" ended up as a product image. Reject what can't resolve.
-    const badUrls = urlList.filter((url) => !isUsableImageRef(url));
-    if (badUrls.length > 0) {
-      found.imageUrls = `Not a usable image link: ${badUrls[0]}`;
-      fail(
-        `"${badUrls[0]}" is not an image link. Use a full https:// address, or upload the file instead.`
-      );
-    }
+    // The bad-URL check that used to live here guarded the free-text URL field,
+    // which is gone: nothing can type a link in any more, so `urlList` only ever
+    // holds the piece's own stored images. Keeping the check would block saving
+    // a legacy record carrying an unloadable URL — with no field left to correct
+    // it in, and no visible error, since the message rendered on that field.
+    // A bad stored image now shows as a broken tile the studio can clear.
 
     return { errors: found, message };
   };
@@ -322,12 +433,15 @@ export default function ProductForm({
     const formData = new FormData();
     formData.append('name', name);
     formData.append('category', effectiveCategory);
-    formData.append('description', description);
     // Strip client-only fields (_files) from the variants JSON; keep existing image URLs
     const variantsPayload = variants.map((v) => ({
       volume: v.volume,
       price: v.price,
       oldPrice: v.oldPrice,
+      // No colour field in the editor any more — this carries whatever a variant
+      // already had straight back. Don't "clean it up": `variants` is $set as a
+      // whole array, so dropping the key here erases the stored colour of every
+      // variant on the next save.
       color: v.color?.trim() || '',
       images: v.images || [],
     }));
@@ -337,19 +451,18 @@ export default function ProductForm({
     variants.forEach((v, i) => {
       (v._files || []).forEach((file) => formData.append(`variantImages_${i}`, file));
     });
-    formData.append('offerText', offerText);
     formData.append('keyFeatures', keyFeatures);
     formData.append('garmentType', garmentType);
     formData.append('collectionName', collectionName);
     formData.append('season', season);
     formData.append('lifeMode', lifeMode);
     formData.append('editSection', editSection);
-    formData.append('limited', String(limited));
-    formData.append('showOnLandingPage', String(showOnLandingPage));
+    // Always sent, so clearing the field actually clears the storefront filter.
+    formData.append('materials', JSON.stringify(toMaterialsPayload(materials)));
 
     // ── Product detail page ────────────────────────────────────────────────
-    // These are always sent, even when blank, exactly like `offerText` and
-    // `garmentType` above. It's tempting to omit an empty one, but the backend
+    // These are always sent, even when blank, exactly like `garmentType`
+    // above. It's tempting to omit an empty one, but the backend
     // updates via `findByIdAndUpdate`, which only $sets the keys it receives —
     // so an omitted field can never be cleared. Emptying a tagline in the studio
     // would silently come back on the next load. Sending '' clears it, and the
@@ -373,6 +486,10 @@ export default function ProductForm({
       .map((s) => ({ label: s.label.trim(), value: s.value.trim() }))
       .filter((s) => s.label && s.value);
     formData.append('specs', JSON.stringify(specsPayload));
+
+    // Same contract as `specs`: unusable rows dropped, empty array still sent so
+    // clearing the chart clears it on the storefront too.
+    formData.append('sizeChart', JSON.stringify(toSizeChartPayload(sizeChart)));
 
     formData.append('careIcons', JSON.stringify(careIcons));
 
@@ -411,7 +528,6 @@ export default function ProductForm({
     }
   };
 
-  const landingLimitReached = otherLandingCount >= LANDING_PAGE_LIMIT && !showOnLandingPage;
   const title = product ? 'Edit Piece' : 'Add Piece';
 
   // Portaled to <body> so this full-viewport drawer is never nested in — and so
@@ -492,50 +608,12 @@ export default function ProductForm({
                   error={!!errors.category}
                   onChange={(e) => setCategory(e.target.value)}
                 >
-                  {/* Fixed THE EDIT categories — always present, always first. */}
-                  {EDIT_SECTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
+                  {categoryOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
                     </option>
                   ))}
-                  {activeCategories
-                    .filter((c) => !EDIT_SECTIONS.includes(c.name))
-                    .map((c) => (
-                      <option key={c._id} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
                 </Select>
-              </Field>
-
-              <Field
-                label="Description"
-                htmlFor={`${uid}-description`}
-                required
-                error={errors.description}
-              >
-                <Textarea
-                  id={`${uid}-description`}
-                  rows={5}
-                  value={description}
-                  error={!!errors.description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </Field>
-
-              <Field
-                label="Offer Text"
-                htmlFor={`${uid}-offer-text`}
-                optional
-                hint="e.g. FLAT 35% OFF. Leave empty for default."
-              >
-                <Input
-                  id={`${uid}-offer-text`}
-                  type="text"
-                  placeholder="Leave empty for default"
-                  value={offerText}
-                  onChange={(e) => setOfferText(e.target.value)}
-                />
               </Field>
 
               <Field
@@ -706,6 +784,76 @@ export default function ProductForm({
                 </p>
               </div>
 
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-sans text-[11px] uppercase tracking-[0.15em] text-muted">
+                    Size Chart — centimetres
+                  </span>
+                  <span className="font-sans text-[11px] text-faint tabular-nums">
+                    {sizeChart.length} {sizeChart.length === 1 ? 'row' : 'rows'}
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {sizeChart.map((row, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-2 sm:grid-cols-[minmax(0,1fr)_repeat(4,minmax(0,1fr))_auto] gap-3 items-end"
+                    >
+                      <Field label="Size" htmlFor={`${uid}-size-row-${i}`}>
+                        <Input
+                          id={`${uid}-size-row-${i}`}
+                          type="text"
+                          placeholder="e.g. M"
+                          value={row.size}
+                          onChange={(e) => patchSizeRow(i, { size: e.target.value })}
+                        />
+                      </Field>
+
+                      {SIZE_CHART_FIELDS.map(({ key, label }) => (
+                        <Field key={key} label={label} htmlFor={`${uid}-size-${key}-${i}`}>
+                          <Input
+                            id={`${uid}-size-${key}-${i}`}
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.1"
+                            placeholder="cm"
+                            value={row[key]}
+                            onChange={(e) => patchSizeRow(i, { [key]: e.target.value })}
+                          />
+                        </Field>
+                      ))}
+
+                      <IconButton
+                        label={`Remove size row ${i + 1}`}
+                        tone="danger"
+                        onClick={() => removeSizeRow(i)}
+                        className="mb-1"
+                      >
+                        <X size={14} />
+                      </IconButton>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={addSizeRow}
+                    className="w-full flex items-center justify-center gap-2 py-4 border border-dashed border-line bg-ivory text-faint hover:text-ink hover:border-ink/40 transition-colors duration-300 ease-editorial"
+                  >
+                    <Plus size={14} aria-hidden />
+                    <span className="eyebrow-tight">Add size</span>
+                  </button>
+                </div>
+
+                <p className="font-sans text-[12px] text-faint mt-2">
+                  Enter centimetres only — the storefront converts to inches on its
+                  own (1 in = 2.54 cm) and offers shoppers a unit toggle. Leave a
+                  measurement blank to drop that column; a row needs a size label
+                  and at least one measurement to be saved.
+                </p>
+              </div>
+
               <Field
                 label="Fit Footer"
                 htmlFor={`${uid}-fit-footer`}
@@ -828,25 +976,6 @@ export default function ProductForm({
                 </p>
               </div>
 
-              <Field
-                label="Or provide Image URLs"
-                htmlFor={`${uid}-image-urls`}
-                optional
-                error={errors.imageUrls}
-                hint="Full https:// links, comma separated. Existing images appear above and are kept unless removed."
-              >
-                <Input
-                  id={`${uid}-image-urls`}
-                  type="text"
-                  // Deliberately not a fake "https://image1.jpg" — the previous
-                  // placeholder was typed in verbatim and saved as a product's
-                  // image, which is exactly the trap this field sets.
-                  placeholder="https://res.cloudinary.com/…/piece.jpg"
-                  value={imageUrls}
-                  error={!!errors.imageUrls}
-                  onChange={(e) => setImageUrls(e.target.value)}
-                />
-              </Field>
             </Section>
 
             <Section label="Placement">
@@ -926,33 +1055,21 @@ export default function ProductForm({
                 </Field>
               </div>
 
-              <div className="border border-line bg-cream p-4">
-                <Checkbox
-                  label="Limited piece"
-                  description="Shows a “LIMITED PIECE” tag on the product card."
-                  checked={limited}
-                  onChange={setLimited}
-                />
-              </div>
-
-              <div
-                className={`border border-line bg-cream p-4 ${
-                  landingLimitReached ? 'opacity-60' : ''
-                }`}
+              <Field
+                label="Materials"
+                htmlFor={`${uid}-materials`}
+                optional
+                hint="Comma separated, e.g. Cotton, Linen. Drives the Material filter on the shop — options are built from what's entered here, so a new fabric needs no code change."
               >
-                <Checkbox
-                  label="Show on Landing Page"
-                  description="Featured on the storefront home page. Five pieces maximum."
-                  checked={showOnLandingPage}
-                  disabled={landingLimitReached}
-                  onChange={setShowOnLandingPage}
+                <Input
+                  id={`${uid}-materials`}
+                  type="text"
+                  placeholder="e.g. Cotton, Linen"
+                  value={materials}
+                  onChange={(e) => setMaterials(e.target.value)}
                 />
-                {landingLimitReached && (
-                  <p className="font-sans text-[12px] text-danger mt-2 pl-7">
-                    Maximum limit of 5 products reached.
-                  </p>
-                )}
-              </div>
+              </Field>
+
             </Section>
           </div>
 

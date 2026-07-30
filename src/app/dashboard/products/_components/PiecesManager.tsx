@@ -296,9 +296,6 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
             key={editing?._id ?? 'new'}
             product={editing}
             categories={categories}
-            otherLandingCount={
-              products.filter((p) => p.showOnLandingPage && p._id !== editing?._id).length
-            }
             onClose={() => setDrawerOpen(false)}
             onSaved={() => {
               setDrawerOpen(false);

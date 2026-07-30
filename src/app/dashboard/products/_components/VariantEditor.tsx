@@ -50,8 +50,34 @@ export default function VariantEditor({
       { volume: '', price: 0, oldPrice: 0, color: '', images: [], _files: [] },
     ]);
 
+  /**
+   * Commit a removal, keeping the gallery alive.
+   *
+   * Only the first variant carries imagery, so deleting that row would take the
+   * product's entire gallery with it — and the studio would have no picker on
+   * the remaining rows to notice, let alone undo it. Hand the photos to
+   * whichever row becomes first instead.
+   */
+  const applyRemoval = (next: IVariant[]) => {
+    const first = variants[0];
+    const lostFirst = next.length > 0 && !next.includes(first);
+    onChange(
+      lostFirst
+        ? next.map((v, i) =>
+            i === 0
+              ? {
+                  ...v,
+                  images: [...(first.images || []), ...(v.images || [])],
+                  _files: [...(first._files || []), ...(v._files || [])],
+                }
+              : v
+          )
+        : next
+    );
+  };
+
   const removeVariant = (index: number) =>
-    onChange(variants.filter((_, i) => i !== index));
+    applyRemoval(variants.filter((_, i) => i !== index));
 
   // ── Quick-add sizes ───────────────────────────────────────────────────────
   // Case-insensitive so "m" and "M" count as the same size.
@@ -74,7 +100,7 @@ export default function VariantEditor({
         toast.error('A product needs at least one size.');
         return;
       }
-      onChange(variants.filter((v) => norm(v.volume) !== label));
+      applyRemoval(variants.filter((v) => norm(v.volume) !== label));
       return;
     }
 
@@ -172,9 +198,6 @@ export default function VariantEditor({
       {variants.map((v, i) => {
         const fieldErrors = errors?.[i];
         const imageCount = (v.images?.length || 0) + (v._files?.length || 0);
-        const swatch = /^#[0-9a-fA-F]{6}$/.test(v.color || '')
-          ? (v.color as string)
-          : '#000000';
 
         return (
           <div key={i} className="border border-line bg-cream p-4 space-y-4">
@@ -232,31 +255,14 @@ export default function VariantEditor({
               </Field>
             </div>
 
-            <Field label="Colour" htmlFor={`${uid}-color-${i}`}>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  aria-label={`Pick a colour for variant ${i + 1}`}
-                  title="Pick colour"
-                  value={swatch}
-                  onChange={(e) => patch(i, { color: e.target.value })}
-                  className="w-10 h-10 shrink-0 border border-line bg-ivory cursor-pointer p-1"
-                />
-                <Input
-                  id={`${uid}-color-${i}`}
-                  type="text"
-                  placeholder="Colour (e.g. Red or #ff0000)"
-                  value={v.color || ''}
-                  className="flex-1 min-w-0"
-                  onChange={(e) => patch(i, { color: e.target.value })}
-                />
-              </div>
-            </Field>
-
+            {/* Imagery lives on the first variant only — every size shares one
+                gallery, so photographing each size separately was duplicated
+                work. Later variants carry size and price alone. */}
+            {i === 0 && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="font-sans text-[11px] uppercase tracking-[0.15em] text-muted">
-                  Variant Images
+                  Product Images
                 </span>
                 <span className="font-sans text-[11px] text-faint tabular-nums">
                   {imageCount}/{MAX_IMAGES}
@@ -291,7 +297,12 @@ export default function VariantEditor({
                   />
                 )}
               </div>
+
+              <p className="font-sans text-[12px] text-faint mt-2">
+                Shared by every size — upload once here.
+              </p>
             </div>
+            )}
           </div>
         );
       })}

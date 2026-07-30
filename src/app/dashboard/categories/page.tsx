@@ -38,6 +38,13 @@ interface ICategory {
   status: string;
 }
 
+/**
+ * Mirrors `MAX_CATEGORIES` in the backend's categoryController, which is the
+ * real gate — this copy only keeps the studio from composing a category the API
+ * would then refuse.
+ */
+const MAX_CATEGORIES = 8;
+
 export default function CategoriesPage() {
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [categories, setCategories] = useState<ICategory[]>([]);
@@ -149,6 +156,10 @@ export default function CategoriesPage() {
     );
   }, [categories, query]);
 
+  // Drives the disabled Add button. The API rejects an over-cap POST regardless,
+  // and `apiErrorMessage` surfaces that message, so this is affordance only.
+  const atCap = categories.length >= MAX_CATEGORIES;
+
   const openAddForm = () => {
     setEditingId(null);
     setName('');
@@ -243,9 +254,9 @@ export default function CategoriesPage() {
       <PageHeader
         eyebrow="The Edit"
         title="Categories"
-        description="The collections that shape the storefront — each one a doorway into the range. Only active categories appear in navigation."
+        description={`The collections that shape the storefront — each one a doorway into the range, up to ${MAX_CATEGORIES}. Only active categories appear in navigation and in a piece's Category list.`}
         action={
-          <Button variant="solid" size="sm" onClick={openAddForm}>
+          <Button variant="solid" size="sm" onClick={openAddForm} disabled={atCap}>
             <Plus size={13} aria-hidden />
             Add Category
           </Button>
@@ -329,7 +340,9 @@ export default function CategoriesPage() {
                 className="w-full max-w-xs"
               />
               <p className="eyebrow-tight text-faint hidden sm:block shrink-0">
-                {filtered.length} {filtered.length === 1 ? 'Category' : 'Categories'}
+                {query
+                  ? `${filtered.length} of ${categories.length}`
+                  : `${categories.length} / ${MAX_CATEGORIES} Categories`}
               </p>
             </div>
 
