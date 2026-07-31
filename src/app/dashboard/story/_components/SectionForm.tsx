@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { X, Plus, Trash2, GripVertical } from 'lucide-react';
 import {
@@ -9,7 +9,6 @@ import {
   Field,
   Input,
   Textarea,
-  Select,
   Checkbox,
   Button,
   ImagePicker,
@@ -36,13 +35,15 @@ interface Props {
 export default function SectionForm({ section, onSaved, onClose }: Props) {
   const editing = !!section;
 
-  const [type, setType] = useState<StorySectionType>(section?.type ?? 'text');
+  // Fixed, not chosen: new sections are always the "Text + Image" editorial
+  // block. An existing section keeps whatever type it was saved with, so its own
+  // fields still render here — FIELDS_BY_TYPE below is still what drives them.
+  const type: StorySectionType = section?.type ?? 'text';
+
   const [eyebrow, setEyebrow] = useState(section?.eyebrow ?? '');
   const [title, setTitle] = useState(section?.title ?? '');
   const [body, setBody] = useState(section?.body ?? '');
   const [tagline, setTagline] = useState(section?.tagline ?? '');
-  const [imageAlt, setImageAlt] = useState(section?.imageAlt ?? '');
-  const [imageLeft, setImageLeft] = useState(section?.imageLeft ?? false);
   const [quote, setQuote] = useState(section?.quote ?? '');
   const [quoteAuthor, setQuoteAuthor] = useState(section?.quoteAuthor ?? '');
   const [ctaLabel, setCtaLabel] = useState(section?.ctaLabel ?? '');
@@ -63,17 +64,6 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
 
   const fields = FIELDS_BY_TYPE[type];
   const has = (f: FieldKey) => fields.includes(f);
-
-  // Object URL for the single-image live preview when a new file is picked.
-  const filePreview = useMemo(
-    () => (imageFile ? URL.createObjectURL(imageFile) : ''),
-    [imageFile]
-  );
-  useEffect(() => {
-    return () => {
-      if (filePreview) URL.revokeObjectURL(filePreview);
-    };
-  }, [filePreview]);
 
   const selectImage = (file: File) => {
     if (file.size > MAX_FILE_SIZE) return toast.error('Image must be under 5MB');
@@ -119,8 +109,6 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
     if (has('title')) fd.append('title', title);
     if (has('body')) fd.append('body', body);
     if (has('tagline')) fd.append('tagline', tagline);
-    if (has('imageAlt')) fd.append('imageAlt', imageAlt);
-    if (has('imageLeft')) fd.append('imageLeft', String(imageLeft));
     if (has('quote')) fd.append('quote', quote);
     if (has('quoteAuthor')) fd.append('quoteAuthor', quoteAuthor);
     if (has('cta')) {
@@ -156,8 +144,6 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
     }
   };
 
-  const previewImage = filePreview || assetUrl(image);
-
   return (
     <Card
       padded={false}
@@ -176,28 +162,6 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
       </div>
 
       <div className="flex-1 overflow-y-auto thin-scrollbar p-5 sm:p-6 space-y-5">
-        {/* Live preview */}
-        <div className="border border-line bg-cream">
-          <div className="px-3 py-2 border-b border-line">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-faint">Live preview</span>
-          </div>
-          <SectionPreview
-            data={{ type, eyebrow, title, body, tagline, quote, quoteAuthor, ctaLabel, imageLeft, timeline }}
-            previewImage={previewImage}
-            galleryCount={galleryUrls.length + galleryFiles.length}
-          />
-        </div>
-
-        <Field label="Section type" htmlFor="section-type" hint={SECTION_TYPES.find((t) => t.value === type)?.hint}>
-          <Select id="section-type" value={type} onChange={(e) => setType(e.target.value as StorySectionType)}>
-            {SECTION_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
         {has('eyebrow') && (
           <Field label="Eyebrow / Label" htmlFor="f-eyebrow" hint="Small uppercase label above the headline.">
             <Input id="f-eyebrow" value={eyebrow} onChange={(e) => setEyebrow(e.target.value)} placeholder="Within" />
@@ -246,23 +210,6 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
               setImage('');
             }}
           />
-        )}
-
-        {has('imageAlt') && (
-          <Field label="Image alt text" htmlFor="f-alt" hint="Describes the image for screen readers and SEO.">
-            <Input id="f-alt" value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} placeholder="A woman in a red kaftan in a teal-walled interior" />
-          </Field>
-        )}
-
-        {has('imageLeft') && (
-          <div className="border-t border-line pt-5">
-            <Checkbox
-              label="Image on the left"
-              description="Otherwise the image sits to the right of the text (desktop)."
-              checked={imageLeft}
-              onChange={setImageLeft}
-            />
-          </div>
         )}
 
         {has('gallery') && (
@@ -349,132 +296,3 @@ function GalleryThumb({ src, onRemove, isNew }: { src: string; onRemove: () => v
   );
 }
 
-// ── Live preview ──────────────────────────────────────────────────────────────
-interface PreviewData {
-  type: StorySectionType;
-  eyebrow: string;
-  title: string;
-  body: string;
-  tagline: string;
-  quote: string;
-  quoteAuthor: string;
-  ctaLabel: string;
-  imageLeft: boolean;
-  timeline: ITimelineItem[];
-}
-
-function SectionPreview({
-  data,
-  previewImage,
-  galleryCount,
-}: {
-  data: PreviewData;
-  previewImage: string;
-  galleryCount: number;
-}) {
-  const { type } = data;
-  const firstPara = (data.body || '').split(/\n{2,}/)[0];
-
-  const ImageBox = ({ ratio = 'aspect-[4/5]' }: { ratio?: string }) =>
-    previewImage ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={previewImage} alt="" className={`w-full ${ratio} object-cover`} />
-    ) : (
-      <div className={`w-full ${ratio} bg-sand flex items-center justify-center text-[10px] uppercase tracking-widest text-faint`}>
-        Image
-      </div>
-    );
-
-  if (type === 'quote') {
-    return (
-      <div className="p-6 text-center bg-tan">
-        <p className="font-serif italic text-[17px] leading-snug text-ink">{data.quote ? `“${data.quote}”` : 'Your quote…'}</p>
-        {data.quoteAuthor && <p className="text-[10px] uppercase tracking-[0.16em] text-bronze-deep mt-3">{data.quoteAuthor}</p>}
-      </div>
-    );
-  }
-
-  if (type === 'cta') {
-    return (
-      <div className="p-5 bg-tan flex items-center justify-between gap-3">
-        <div>
-          {data.eyebrow && <p className="text-[9px] uppercase tracking-[0.16em] text-faint mb-1">{data.eyebrow}</p>}
-          <p className="font-serif text-[15px] text-ink leading-snug">{data.title || 'Headline…'}</p>
-        </div>
-        {data.ctaLabel && <span className="shrink-0 bg-ink text-ivory text-[9px] uppercase tracking-[0.14em] px-3 py-2">{data.ctaLabel}</span>}
-      </div>
-    );
-  }
-
-  if (type === 'timeline') {
-    return (
-      <div className="p-5">
-        {data.eyebrow && <p className="text-[9px] uppercase tracking-[0.16em] text-faint text-center mb-4">{data.eyebrow}</p>}
-        <div className="grid grid-cols-3 gap-2 text-center">
-          {(data.timeline.length ? data.timeline : [{ label: '01', text: 'Step' }]).slice(0, 3).map((it, i) => (
-            <div key={i}>
-              <span className="font-serif text-[20px] text-bronze block">{it.label || '—'}</span>
-              <p className="text-[10px] text-muted leading-tight mt-1">{it.text}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (type === 'gallery') {
-    return (
-      <div className="p-5">
-        {data.title && <p className="font-serif text-[15px] text-ink mb-3">{data.title}</p>}
-        <div className="grid grid-cols-3 gap-1.5">
-          {Array.from({ length: Math.max(galleryCount, 3) }).slice(0, 6).map((_, i) => (
-            <div key={i} className="aspect-[4/5] bg-sand" />
-          ))}
-        </div>
-        <p className="text-[10px] text-faint mt-2">{galleryCount} image{galleryCount === 1 ? '' : 's'}</p>
-      </div>
-    );
-  }
-
-  if (type === 'image') {
-    return (
-      <div className="p-5">
-        <ImageBox ratio="aspect-[16/9]" />
-        {data.title && <p className="font-serif text-[15px] text-ink mt-3">{data.title}</p>}
-        {firstPara && <p className="text-[11px] text-muted mt-1 line-clamp-2">{firstPara}</p>}
-      </div>
-    );
-  }
-
-  // two-column (text / hero / founders-note)
-  const textCol = (
-    <div className="flex-1">
-      {data.eyebrow && <p className="text-[9px] uppercase tracking-[0.16em] text-bronze-deep mb-1.5">{data.eyebrow}</p>}
-      <p className="font-serif text-[15px] leading-snug text-ink">{data.title || 'Headline…'}</p>
-      {firstPara && <p className="text-[11px] text-muted leading-relaxed mt-2 line-clamp-3">{firstPara}</p>}
-      {data.tagline && <p className="font-serif italic text-[11px] text-muted mt-2">{data.tagline}</p>}
-      {data.ctaLabel && <p className="text-[9px] uppercase tracking-[0.14em] text-ink border-b border-ink inline-block pb-0.5 mt-3">{data.ctaLabel}</p>}
-    </div>
-  );
-  const imageCol = (
-    <div className="w-[38%] shrink-0">
-      <ImageBox />
-    </div>
-  );
-
-  return (
-    <div className="p-5 flex items-center gap-4">
-      {data.imageLeft ? (
-        <>
-          {imageCol}
-          {textCol}
-        </>
-      ) : (
-        <>
-          {textCol}
-          {imageCol}
-        </>
-      )}
-    </div>
-  );
-}

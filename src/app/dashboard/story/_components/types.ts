@@ -57,14 +57,16 @@ export const SECTION_TYPES: { value: StorySectionType; label: string; hint: stri
   { value: 'cta', label: 'CTA Banner', hint: 'A cream banner with a headline and a button.' },
 ];
 
+// No 'imageAlt' or 'imageLeft': both were dropped from the editor. Alt text is
+// derived from the headline by the storefront, and the two-column layout is
+// fixed to image-right. Adding either key back here is all it takes to restore
+// the field.
 export type FieldKey =
   | 'eyebrow'
   | 'title'
   | 'body'
   | 'tagline'
   | 'image'
-  | 'imageAlt'
-  | 'imageLeft'
   | 'gallery'
   | 'quote'
   | 'quoteAuthor'
@@ -73,10 +75,10 @@ export type FieldKey =
 
 /** Which fields each section type exposes in the form. */
 export const FIELDS_BY_TYPE: Record<StorySectionType, FieldKey[]> = {
-  hero: ['eyebrow', 'title', 'body', 'image', 'imageAlt', 'imageLeft'],
-  'founders-note': ['eyebrow', 'title', 'body', 'tagline', 'image', 'imageAlt', 'imageLeft'],
-  text: ['eyebrow', 'title', 'body', 'tagline', 'image', 'imageAlt', 'imageLeft', 'cta'],
-  image: ['title', 'body', 'image', 'imageAlt'],
+  hero: ['eyebrow', 'title', 'body', 'image'],
+  'founders-note': ['eyebrow', 'title', 'body', 'tagline', 'image'],
+  text: ['eyebrow', 'title', 'body', 'tagline', 'image', 'cta'],
+  image: ['title', 'body', 'image'],
   gallery: ['eyebrow', 'title', 'gallery'],
   quote: ['quote', 'quoteAuthor'],
   timeline: ['eyebrow', 'timeline'],
