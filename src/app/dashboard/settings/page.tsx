@@ -15,7 +15,7 @@ export default function SettingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await api.get('/site-settings');
+      const res = await api.get('/site-settings', { params: { t: Date.now() } });
       if (res.data?.success) setSettings(res.data.data);
     } catch (e) {
       toastApiError(e, 'Could not load site settings.');
