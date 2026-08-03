@@ -38,14 +38,7 @@ export default function StoryPage() {
   const [deleting, setDeleting] = useState(false);
   const [reordering, setReordering] = useState(false);
 
-  // SEO / intro settings form
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [metaTitle, setMetaTitle] = useState('');
-  const [metaDescription, setMetaDescription] = useState('');
-  const [slug, setSlug] = useState('story');
-  const [introEyebrow, setIntroEyebrow] = useState('');
-  const [introHeading, setIntroHeading] = useState('');
-  const [introDescription, setIntroDescription] = useState('');
+  // SEO settings removed as per request
 
   const load = useCallback(async () => {
     try {
@@ -55,12 +48,6 @@ export default function StoryPage() {
         setSections(data.sections || []);
         const s: IStorySettings = data.settings || {};
         setSettings(s);
-        setMetaTitle(s.metaTitle || '');
-        setMetaDescription(s.metaDescription || '');
-        setSlug(s.slug || 'story');
-        setIntroEyebrow(s.introEyebrow || '');
-        setIntroHeading(s.introHeading || '');
-        setIntroDescription(s.introDescription || '');
       }
     } catch (e) {
       toast.error(apiErrorMessage(e, 'Could not load the Story page.'));
@@ -141,27 +128,7 @@ export default function StoryPage() {
     }
   };
 
-  const saveSettings = async () => {
-    setSavingSettings(true);
-    try {
-      const res = await api.put('/story/settings', {
-        metaTitle,
-        metaDescription,
-        slug,
-        introEyebrow,
-        introHeading,
-        introDescription,
-      });
-      if (res.data?.success) {
-        setSettings(res.data.data);
-        toast.success('Story settings saved');
-      }
-    } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not save settings'));
-    } finally {
-      setSavingSettings(false);
-    }
-  };
+  // saveSettings removed
 
   return (
     <div className="pb-4">
@@ -185,35 +152,6 @@ export default function StoryPage() {
         }
       />
 
-      {/* SEO / intro settings */}
-      <Card className="mb-6 p-5 sm:p-6">
-        <CardHeader eyebrow="Page Settings" title="SEO & Intro" />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-          <Field label="Meta title" htmlFor="s-meta-title" hint="Browser tab + search result title.">
-            <Input id="s-meta-title" value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} placeholder="Story · Genesis by Preethy" />
-          </Field>
-          <Field label="URL slug" htmlFor="s-slug" hint="The page path segment.">
-            <Input id="s-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="story" />
-          </Field>
-          <Field label="Meta description" htmlFor="s-meta-desc" className="lg:col-span-2" hint="The search-result snippet (~155 chars).">
-            <Textarea id="s-meta-desc" rows={2} value={metaDescription} onChange={(e) => setMetaDescription(e.target.value)} />
-          </Field>
-          <Field label="Intro eyebrow" htmlFor="s-intro-eyebrow">
-            <Input id="s-intro-eyebrow" value={introEyebrow} onChange={(e) => setIntroEyebrow(e.target.value)} placeholder="Story · Genesis by Preethy" />
-          </Field>
-          <Field label="Intro heading" htmlFor="s-intro-heading" hint="The H1 at the top of the page.">
-            <Input id="s-intro-heading" value={introHeading} onChange={(e) => setIntroHeading(e.target.value)} placeholder="Clothing for the adult who has stopped dressing to impress." />
-          </Field>
-          <Field label="Intro description" htmlFor="s-intro-desc" className="lg:col-span-2" hint="The paragraph under the intro heading.">
-            <Textarea id="s-intro-desc" rows={2} value={introDescription} onChange={(e) => setIntroDescription(e.target.value)} placeholder="Genesis by Preethy is natural clothing for tropical climates, made in Kochi, Kerala — and for a life that no longer needs to perform." />
-          </Field>
-        </div>
-        <div className="mt-5">
-          <Button variant="solid" size="sm" onClick={saveSettings} loading={savingSettings}>
-            Save settings
-          </Button>
-        </div>
-      </Card>
 
       <div className="flex flex-col xl:flex-row gap-6 items-start">
         {/* Section list */}
