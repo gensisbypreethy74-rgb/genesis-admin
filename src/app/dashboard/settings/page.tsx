@@ -12,6 +12,7 @@ interface SiteSettings {
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -19,6 +20,7 @@ export default function SettingsPage() {
       if (res.data?.success) setSettings(res.data.data);
     } catch (e) {
       toastApiError(e, 'Could not load site settings.');
+      setError(true);
     }
   }, []);
 
@@ -43,6 +45,15 @@ export default function SettingsPage() {
       setSaving(false);
     }
   };
+
+  if (error && !settings) {
+    return (
+      <div className="py-24 flex flex-col items-center justify-center text-center">
+        <p className="text-red-500 mb-4">Could not load settings. Please try again later.</p>
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
 
   if (!settings) return <div className="py-24 flex justify-center"><Spinner /></div>;
 
