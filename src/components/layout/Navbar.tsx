@@ -15,7 +15,7 @@ interface NavbarProps {
 }
 
 const STOREFRONT_URL =
-  process.env.NEXT_PUBLIC_STOREFRONT_URL || 'http://localhost:3000';
+  process.env.NEXT_PUBLIC_STOREFRONT_URL || 'https://genesisbypreethy.com';
 
 /**
  * Slim top bar. The page title now lives in each page's PageHeader, so this
