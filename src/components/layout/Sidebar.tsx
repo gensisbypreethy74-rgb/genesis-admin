@@ -17,6 +17,7 @@ import {
   Mail,
   LogOut,
   X,
+  Settings,
 } from 'lucide-react';
 import { clearAdminSession } from '@/lib/adminSession';
 import Logo from '@/components/ui/Logo';
@@ -36,6 +37,7 @@ const ICONS = {
   story: BookOpen,
   customers: Users,
   newsletter: Mail,
+  settings: Settings,
 } as const;
 
 interface SidebarProps {
@@ -134,7 +136,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* ── Desktop: in-flow, always visible ─────────────────────────────── */}
+      {/* -- Desktop: in-flow, always visible ------------------------------- */}
       <aside className="hidden lg:flex w-[248px] bg-ink flex-col shrink-0">
         <div className="h-[76px] px-6 flex items-center shrink-0 border-b border-ivory/10">
           <Wordmark />
@@ -142,7 +144,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         <SidebarNav onNavClick={() => {}} onLogout={handleLogout} />
       </aside>
 
-      {/* ── Mobile: overlay drawer ───────────────────────────────────────── */}
+      {/* -- Mobile: overlay drawer ----------------------------------------- */}
       <AnimatePresence>
         {isOpen && (
           <div className="lg:hidden">
