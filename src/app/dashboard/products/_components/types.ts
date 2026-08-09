@@ -70,18 +70,73 @@ export interface ISizeChartRow {
   bust?: number;
   waist?: number;
   hip?: number;
+  inseam?: number;
   length?: number;
 }
 
-/** The size-chart measurement columns, in the order the table renders them. */
+/** A named size chart with its own measurement columns (`fields`). */
+export interface ISizeChartGroup {
+  title: string;
+  fields?: SizeChartField[];
+  rows: ISizeChartRow[];
+}
+
+/** Master list of measurement columns; each chart picks a subset via `fields`. */
 export const SIZE_CHART_FIELDS = [
   { key: 'bust', label: 'Bust' },
   { key: 'waist', label: 'Waist' },
   { key: 'hip', label: 'Hip' },
-  { key: 'length', label: 'Length' },
+  { key: 'inseam', label: 'Inseam' },
+  { key: 'length', label: 'Total Length' },
 ] as const;
 
 export type SizeChartField = (typeof SIZE_CHART_FIELDS)[number]['key'];
+
+/**
+ * Defaults seeded into a NEW product so every piece ships with a filled-in spec
+ * table, size chart and delivery note out of the box. All editable per product;
+ * these are just sensible starting numbers the studio adjusts to the garment.
+ */
+export const DEFAULT_SPECS: ISpec[] = [
+  { label: 'Neck', value: '15 in' },
+  { label: 'Shoulder', value: '16 in' },
+  { label: 'Bust', value: '38 in' },
+  { label: 'Waist', value: '32 in' },
+  { label: 'Hip', value: '40 in' },
+  { label: 'Total Length', value: '44 in' },
+];
+
+/** Size-chart rows in CENTIMETRES (the storefront derives inches). */
+export const DEFAULT_SIZE_ROWS: ISizeChartRow[] = [
+  { size: 'S', bust: 86, waist: 68, hip: 92, length: 108 },
+  { size: 'M', bust: 91, waist: 73, hip: 97, length: 110 },
+  { size: 'L', bust: 96, waist: 78, hip: 102, length: 112 },
+  { size: 'XL', bust: 102, waist: 84, hip: 108, length: 114 },
+  { size: 'XXL', bust: 108, waist: 90, hip: 114, length: 116 },
+];
+
+/**
+ * Two named size charts seeded into a NEW product. Bottoms have no bust column,
+ * so those cells are left blank (the storefront drops empty columns). Both the
+ * headings and every value are editable per product.
+ */
+export const DEFAULT_SIZE_CHART_GROUPS: ISizeChartGroup[] = [
+  { title: 'Top & Dresses', fields: ['bust', 'waist', 'hip', 'length'], rows: DEFAULT_SIZE_ROWS },
+  {
+    title: 'Bottom',
+    fields: ['waist', 'hip', 'inseam', 'length'],
+    rows: [
+      { size: 'S', waist: 68, hip: 92, inseam: 74, length: 96 },
+      { size: 'M', waist: 73, hip: 97, inseam: 75, length: 98 },
+      { size: 'L', waist: 78, hip: 102, inseam: 76, length: 100 },
+      { size: 'XL', waist: 84, hip: 108, inseam: 77, length: 102 },
+      { size: 'XXL', waist: 90, hip: 114, inseam: 78, length: 104 },
+    ],
+  },
+];
+
+export const DEFAULT_DELIVERY_NOTE =
+  'Dispatched within 3–5 business days. Free shipping across India. Easy 7-day returns and exchanges on unworn pieces with tags intact.';
 
 export interface IProduct {
   _id: string;
@@ -112,6 +167,7 @@ export interface IProduct {
   materialText?: string;
   specs?: ISpec[];
   sizeChart?: ISizeChartRow[];
+  sizeCharts?: ISizeChartGroup[];
   fitFooter?: string;
   careIcons?: CareIcon[];
   careText?: string;

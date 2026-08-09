@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Trash2 } from 'lucide-react';
 import { api, apiErrorMessage, assetUrl } from '@/lib/api';
 import {
   Button,
@@ -25,10 +25,15 @@ import {
   LIFE_MODES,
   MAX_IMAGES,
   SIZE_CHART_FIELDS,
+  DEFAULT_SPECS,
+  DEFAULT_SIZE_ROWS,
+  DEFAULT_SIZE_CHART_GROUPS,
+  DEFAULT_DELIVERY_NOTE,
   type CareIcon,
   type ICategory,
   type IProduct,
   type ISizeChartRow,
+  type ISizeChartGroup,
   type ISpec,
   type IVariant,
   type SizeChartField,
@@ -75,6 +80,7 @@ const EMPTY_SIZE_ROW: SizeChartDraft = {
   bust: '',
   waist: '',
   hip: '',
+  inseam: '',
   length: '',
 };
 
@@ -83,7 +89,24 @@ const toDraft = (row: ISizeChartRow): SizeChartDraft => ({
   bust: row.bust?.toString() ?? '',
   waist: row.waist?.toString() ?? '',
   hip: row.hip?.toString() ?? '',
+  inseam: row.inseam?.toString() ?? '',
   length: row.length?.toString() ?? '',
+});
+
+/** key → label lookup for a chart's chosen columns. */
+const FIELD_LABEL = Object.fromEntries(SIZE_CHART_FIELDS.map((f) => [f.key, f.label])) as Record<
+  SizeChartField,
+  string
+>;
+const ALL_FIELD_KEYS = SIZE_CHART_FIELDS.map((f) => f.key);
+
+/** A named size chart while it's being edited — carries its own columns. */
+type SizeChartGroupDraft = { title: string; fields: SizeChartField[]; rows: SizeChartDraft[] };
+const toGroupDraft = (g: ISizeChartGroup): SizeChartGroupDraft => ({
+  title: g.title,
+  // Legacy charts had no `fields` — fall back to the full column set.
+  fields: g.fields?.length ? g.fields : [...ALL_FIELD_KEYS],
+  rows: g.rows.map(toDraft),
 });
 
 /**
@@ -200,18 +223,27 @@ export default function ProductForm({
   const [studioNotes, setStudioNotes] = useState(product?.studioNotes ?? '');
   const [materialText, setMaterialText] = useState(product?.materialText ?? '');
   // Deep copy, as with variants: editing must not mutate the row behind us.
-  // No seeded rows on a new piece — an empty table is a deliberate choice, and
-  // pre-filled "Length / Shoulder" placeholders would get saved as-is.
+  // A NEW piece ships with the default spec table (measurement labels, blank
+  // values) so every product has one out of the box; editing keeps whatever was
+  // saved. All rows are editable / removable below.
   const [specs, setSpecs] = useState<ISpec[]>(() =>
-    (product?.specs ?? []).map((s) => ({ label: s.label, value: s.value }))
+    product
+      ? (product.specs ?? []).map((s) => ({ label: s.label, value: s.value }))
+      : DEFAULT_SPECS.map((s) => ({ label: s.label, value: s.value }))
   );
   // Size chart rows are held as strings, not numbers, so a half-typed cell
   // ("9", mid-way to "94") stays exactly what was typed instead of being
   // round-tripped through Number() on every keystroke. They convert once, on
   // submit. Values are centimetres — the storefront derives inches.
-  const [sizeChart, setSizeChart] = useState<SizeChartDraft[]>(() =>
-    (product?.sizeChart ?? []).map(toDraft)
-  );
+  // Multiple named size charts. New pieces seed the two defaults; an older
+  // piece with a single legacy `sizeChart` is wrapped as one titled chart.
+  const [sizeCharts, setSizeCharts] = useState<SizeChartGroupDraft[]>(() => {
+    if (!product) return DEFAULT_SIZE_CHART_GROUPS.map(toGroupDraft);
+    if (product.sizeCharts?.length) return product.sizeCharts.map(toGroupDraft);
+    if (product.sizeChart?.length)
+      return [{ title: 'Size Chart', fields: [...ALL_FIELD_KEYS], rows: product.sizeChart.map(toDraft) }];
+    return [];
+  });
   const [fitFooter, setFitFooter] = useState(product?.fitFooter ?? '');
   // Filtering the saved list through CARE_ICONS drops anything the storefront
   // could not render anyway, and pins the order to the checklist's.
@@ -220,7 +252,9 @@ export default function ProductForm({
     return CARE_ICONS.filter((icon) => saved.includes(icon));
   });
   const [careText, setCareText] = useState(product?.careText ?? '');
-  const [shippingReturns, setShippingReturns] = useState(product?.shippingReturns ?? '');
+  const [shippingReturns, setShippingReturns] = useState(
+    product ? (product.shippingReturns ?? '') : DEFAULT_DELIVERY_NOTE
+  );
   // Existing images round-trip through this comma-separated field, exactly as
   // before: they are absolutised for display and re-posted as `images`.
   const [imageUrls, setImageUrls] = useState(() =>
@@ -348,13 +382,29 @@ export default function ProductForm({
     setSpecs((prev) => prev.filter((_, i) => i !== index));
 
   // ── Size chart rows (centimetres) ───────────────────────────────────────
-  const patchSizeRow = (index: number, changes: Partial<SizeChartDraft>) =>
-    setSizeChart((prev) => prev.map((r, i) => (i === index ? { ...r, ...changes } : r)));
-
-  const addSizeRow = () => setSizeChart((prev) => [...prev, { ...EMPTY_SIZE_ROW }]);
-
-  const removeSizeRow = (index: number) =>
-    setSizeChart((prev) => prev.filter((_, i) => i !== index));
+  const patchChartTitle = (gi: number, title: string) =>
+    setSizeCharts((prev) => prev.map((g, i) => (i === gi ? { ...g, title } : g)));
+  const patchSizeRow = (gi: number, ri: number, changes: Partial<SizeChartDraft>) =>
+    setSizeCharts((prev) =>
+      prev.map((g, i) =>
+        i === gi ? { ...g, rows: g.rows.map((r, j) => (j === ri ? { ...r, ...changes } : r)) } : g
+      )
+    );
+  const addSizeRow = (gi: number) =>
+    setSizeCharts((prev) =>
+      prev.map((g, i) => (i === gi ? { ...g, rows: [...g.rows, { ...EMPTY_SIZE_ROW }] } : g))
+    );
+  const removeSizeRow = (gi: number, ri: number) =>
+    setSizeCharts((prev) =>
+      prev.map((g, i) => (i === gi ? { ...g, rows: g.rows.filter((_, j) => j !== ri) } : g))
+    );
+  const addSizeChart = () =>
+    setSizeCharts((prev) => [
+      ...prev,
+      { title: 'New Size Chart', fields: ['bust', 'waist', 'hip', 'length'], rows: DEFAULT_SIZE_ROWS.map(toDraft) },
+    ]);
+  const removeSizeChart = (gi: number) =>
+    setSizeCharts((prev) => prev.filter((_, i) => i !== gi));
 
   /** Toggle one care symbol, keeping the stored order equal to CARE_ICONS'. */
   const toggleCareIcon = (icon: CareIcon, checked: boolean) =>
@@ -489,7 +539,12 @@ export default function ProductForm({
 
     // Same contract as `specs`: unusable rows dropped, empty array still sent so
     // clearing the chart clears it on the storefront too.
-    formData.append('sizeChart', JSON.stringify(toSizeChartPayload(sizeChart)));
+    const sizeChartsPayload = sizeCharts
+      .map((g) => ({ title: g.title.trim(), fields: g.fields, rows: toSizeChartPayload(g.rows) }))
+      .filter((g) => g.title && g.rows.length);
+    formData.append('sizeCharts', JSON.stringify(sizeChartsPayload));
+    // Migrate off the legacy single chart so it can't shadow the named ones.
+    formData.append('sizeChart', JSON.stringify([]));
 
     formData.append('careIcons', JSON.stringify(careIcons));
 
@@ -787,62 +842,108 @@ export default function ProductForm({
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-sans text-[11px] uppercase tracking-[0.15em] text-muted">
-                    Size Chart — centimetres
+                    Size Charts — centimetres
                   </span>
                   <span className="font-sans text-[11px] text-faint tabular-nums">
-                    {sizeChart.length} {sizeChart.length === 1 ? 'row' : 'rows'}
+                    {sizeCharts.length} {sizeCharts.length === 1 ? 'chart' : 'charts'}
                   </span>
                 </div>
 
-                <div className="space-y-3">
-                  {sizeChart.map((row, i) => (
-                    <div
-                      key={i}
-                      className="grid grid-cols-2 sm:grid-cols-[minmax(0,1fr)_repeat(4,minmax(0,1fr))_auto] gap-3 items-end"
-                    >
-                      <Field label="Size" htmlFor={`${uid}-size-row-${i}`}>
-                        <Input
-                          id={`${uid}-size-row-${i}`}
-                          type="text"
-                          placeholder="e.g. M"
-                          value={row.size}
-                          onChange={(e) => patchSizeRow(i, { size: e.target.value })}
-                        />
-                      </Field>
-
-                      {SIZE_CHART_FIELDS.map(({ key, label }) => (
-                        <Field key={key} label={label} htmlFor={`${uid}-size-${key}-${i}`}>
+                <div className="space-y-5">
+                  {sizeCharts.map((group, gi) => (
+                    <div key={gi} className="border border-line bg-cream p-4 space-y-3">
+                      {/* Editable heading + remove-chart */}
+                      <div className="flex items-end gap-3">
+                        <Field
+                          label="Size chart heading"
+                          htmlFor={`${uid}-chart-title-${gi}`}
+                          className="flex-1"
+                        >
                           <Input
-                            id={`${uid}-size-${key}-${i}`}
-                            type="number"
-                            inputMode="decimal"
-                            min="0"
-                            step="0.1"
-                            placeholder="cm"
-                            value={row[key]}
-                            onChange={(e) => patchSizeRow(i, { [key]: e.target.value })}
+                            id={`${uid}-chart-title-${gi}`}
+                            type="text"
+                            placeholder="e.g. Top & Dresses"
+                            value={group.title}
+                            onChange={(e) => patchChartTitle(gi, e.target.value)}
                           />
                         </Field>
+                        {sizeCharts.length > 1 && (
+                          <IconButton
+                            label={`Remove ${group.title || 'chart'}`}
+                            tone="danger"
+                            onClick={() => removeSizeChart(gi)}
+                            className="mb-1"
+                          >
+                            <Trash2 size={14} />
+                          </IconButton>
+                        )}
+                      </div>
+
+                      {group.rows.map((row, ri) => (
+                        <div key={ri} className="flex flex-wrap items-end gap-3">
+                          <Field
+                            label="Size"
+                            htmlFor={`${uid}-size-${gi}-${ri}`}
+                            className="flex-1 min-w-[72px]"
+                          >
+                            <Input
+                              id={`${uid}-size-${gi}-${ri}`}
+                              type="text"
+                              placeholder="e.g. M"
+                              value={row.size}
+                              onChange={(e) => patchSizeRow(gi, ri, { size: e.target.value })}
+                            />
+                          </Field>
+
+                          {group.fields.map((key) => (
+                            <Field
+                              key={key}
+                              label={FIELD_LABEL[key]}
+                              htmlFor={`${uid}-size-${gi}-${key}-${ri}`}
+                              className="flex-1 min-w-[72px]"
+                            >
+                              <Input
+                                id={`${uid}-size-${gi}-${key}-${ri}`}
+                                type="number"
+                                inputMode="decimal"
+                                min="0"
+                                step="0.1"
+                                placeholder="cm"
+                                value={row[key]}
+                                onChange={(e) => patchSizeRow(gi, ri, { [key]: e.target.value })}
+                              />
+                            </Field>
+                          ))}
+
+                          <IconButton
+                            label={`Remove size row ${ri + 1}`}
+                            tone="danger"
+                            onClick={() => removeSizeRow(gi, ri)}
+                            className="mb-1 shrink-0"
+                          >
+                            <X size={14} />
+                          </IconButton>
+                        </div>
                       ))}
 
-                      <IconButton
-                        label={`Remove size row ${i + 1}`}
-                        tone="danger"
-                        onClick={() => removeSizeRow(i)}
-                        className="mb-1"
+                      <button
+                        type="button"
+                        onClick={() => addSizeRow(gi)}
+                        className="w-full flex items-center justify-center gap-2 py-3 border border-dashed border-line bg-ivory text-faint hover:text-ink hover:border-ink/40 transition-colors duration-300 ease-editorial"
                       >
-                        <X size={14} />
-                      </IconButton>
+                        <Plus size={14} aria-hidden />
+                        <span className="eyebrow-tight">Add size</span>
+                      </button>
                     </div>
                   ))}
 
                   <button
                     type="button"
-                    onClick={addSizeRow}
+                    onClick={addSizeChart}
                     className="w-full flex items-center justify-center gap-2 py-4 border border-dashed border-line bg-ivory text-faint hover:text-ink hover:border-ink/40 transition-colors duration-300 ease-editorial"
                   >
                     <Plus size={14} aria-hidden />
-                    <span className="eyebrow-tight">Add size</span>
+                    <span className="eyebrow-tight">Add size chart</span>
                   </button>
                 </div>
 
