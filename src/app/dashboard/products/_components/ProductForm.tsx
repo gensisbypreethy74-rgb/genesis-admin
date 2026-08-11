@@ -242,7 +242,9 @@ export default function ProductForm({
     if (product.sizeCharts?.length) return product.sizeCharts.map(toGroupDraft);
     if (product.sizeChart?.length)
       return [{ title: 'Size Chart', fields: [...ALL_FIELD_KEYS], rows: product.sizeChart.map(toDraft) }];
-    return [];
+    // A piece saved before size charts existed still shows the defaults, so the
+    // section is present and editable by default — like the spec table.
+    return DEFAULT_SIZE_CHART_GROUPS.map(toGroupDraft);
   });
   const [fitFooter, setFitFooter] = useState(product?.fitFooter ?? '');
   // Filtering the saved list through CARE_ICONS drops anything the storefront
