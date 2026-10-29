@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion, useIsPresent, useReducedMotion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { Plus, X, Trash2 } from 'lucide-react';
-import { api, apiErrorMessage, assetUrl } from '@/lib/api';
+import { api, toastApiError } from '@/lib/api';
+import { useDialogBehaviour } from '@/components/ui/Modal';
 import {
   Button,
   Checkbox,
+  ConfirmDialog,
   Field,
   IconButton,
   ImagePicker,
@@ -57,10 +59,17 @@ import {
  * all optional but are sent even when blank, because the backend updates with
  * `findByIdAndUpdate` — a key that isn't in the request is left alone, so
  * omitting an emptied field would make it impossible to ever clear one.
- * `specs` and `careIcons` are JSON-encoded because FormData flattens everything
- * to strings; the backend's `attachUploads` revives exactly `variants`, `specs`
- * and `careIcons`.
+ * The structured fields are JSON-encoded because FormData flattens everything
+ * to strings; the backend's `attachUploads` revives exactly `variants`,
+ * `specs`, `careIcons`, `sizeChart`, `sizeCharts` and `materials`. Booleans go
+ * as 'true' / 'false', which Mongoose casts.
  */
+
+/** Product `status` values the backend knows. Archived hides a piece from the shop. */
+const PRODUCT_STATUSES = [
+  { value: 'In Stock', label: 'In Stock — shown in the shop' },
+  { value: 'Archived', label: 'Archived — hidden from the shop' },
+];
 
 interface FormErrors {
   name?: string;
@@ -177,8 +186,10 @@ export default function ProductForm({
 }) {
   const uid = useId();
   const reduce = useReducedMotion();
+  // False while the parent's AnimatePresence plays the exit, so focus, inert
+  // and scroll lock are handed back as soon as the drawer starts closing.
+  const isPresent = useIsPresent();
   const panelRef = useRef<HTMLElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const activeCategories = categories.filter((c) => c.status === 'ACTIVE');
 
@@ -213,6 +224,12 @@ export default function ProductForm({
   const [materials, setMaterials] = useState((product?.materials ?? []).join(', '));
   const [lifeMode, setLifeMode] = useState(product?.lifeMode ?? '');
   const [season, setSeason] = useState(product?.season ?? '');
+  // Only the two contract values; anything else was never hidden from the
+  // shop, so it seeds as In Stock.
+  const [status, setStatus] = useState(product?.status === 'Archived' ? 'Archived' : 'In Stock');
+  const [limited, setLimited] = useState(product?.limited ?? false);
+  const [showOnLandingPage, setShowOnLandingPage] = useState(product?.showOnLandingPage ?? false);
+  const [offerText, setOfferText] = useState(product?.offerText ?? '');
 
   // ── Product detail page copy ────────────────────────────────────────────
   // Seeded from `product` in the initialiser like everything else here — the
@@ -257,11 +274,13 @@ export default function ProductForm({
   const [shippingReturns, setShippingReturns] = useState(
     product ? (product.shippingReturns ?? '') : DEFAULT_DELIVERY_NOTE
   );
-  // Existing images round-trip through this comma-separated field, exactly as
-  // before: they are absolutised for display and re-posted as `images`.
-  const [imageUrls, setImageUrls] = useState(() =>
-    product ? product.images.map((url) => assetUrl(url)).join(', ') : ''
-  );
+  // The piece's stored images, exactly as stored (Cloudinary URLs or
+  // `/uploads/...` paths), re-posted verbatim as `images` so they survive a
+  // save — the backend $sets whatever `images` it receives. ImagePicker applies
+  // `assetUrl` for display only. (They used to round-trip as absolutised URLs in
+  // a comma-joined string, which wrote this admin's backend origin into the
+  // database and split any URL containing a comma.)
+  const [storedImages, setStoredImages] = useState<string[]>(() => [...(product?.images ?? [])]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [variants, setVariants] = useState<IVariant[]>(() => {
     if (!product) {
@@ -279,6 +298,8 @@ export default function ProductForm({
       oldPrice: v.oldPrice,
       color: v.color || '',
       images: [...(v.images || [])],
+      // null / missing = not tracked.
+      stock: v.stock ?? undefined,
       _files: [] as File[],
     }));
 
@@ -304,51 +325,34 @@ export default function ProductForm({
     return rows;
   });
 
-  // Escape to close.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // ── Closing ─────────────────────────────────────────────────────────────
+  // Everything the form would save, as one string, captured on mount — so
+  // Escape, a backdrop click or Cancel can tell whether closing loses work.
+  const snapshot = () =>
+    JSON.stringify([
+      name, category, keyFeatures, garmentType, collectionName, editSection, materials,
+      lifeMode, season, status, limited, showOnLandingPage, offerText, tagline, fitNote,
+      modelNote, studioNotes, materialText, specs, sizeCharts, fitFooter, careIcons, careText,
+      shippingReturns, storedImages, imageFiles.length,
+      variants.map((v) => [v.volume, v.price, v.oldPrice, v.stock, v.images, v._files?.length]),
+    ]);
+  const [initialSnapshot] = useState(snapshot);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  // Lock background scroll for as long as the drawer is mounted. The admin's
-  // real scroller is <main data-scroll-container>, not <body> — so flag the
-  // document and let globals.css freeze the marked container (same mechanism
-  // as Modal). Setting body.overflow alone was a no-op inside the dashboard.
-  useEffect(() => {
-    const root = document.documentElement;
-    const previous = document.body.style.overflow;
-    root.classList.add('modal-open');
-    document.body.style.overflow = 'hidden';
-    return () => {
-      root.classList.remove('modal-open');
-      document.body.style.overflow = previous;
-    };
-  }, []);
+  const requestClose = () => {
+    if (saving) return;
+    if (snapshot() !== initialSnapshot) setConfirmDiscard(true);
+    else onClose();
+  };
 
-  // Move focus into the panel, and hand it back to the trigger on close.
-  useEffect(() => {
-    restoreFocusRef.current = document.activeElement as HTMLElement | null;
-    const id = requestAnimationFrame(() => panelRef.current?.focus());
-    return () => {
-      cancelAnimationFrame(id);
-      restoreFocusRef.current?.focus?.();
-    };
-  }, []);
+  // Escape, focus trap, inert background, scroll lock and focus restore — the
+  // same behaviour as Modal, from the same hook.
+  useDialogBehaviour(isPresent, panelRef, requestClose);
 
   // ── Product-level imagery ───────────────────────────────────────────────
-  // `imageUrls` is no longer typed into — it exists purely so a piece's already
-  // stored images survive a save. They render as tiles, can be cleared or
-  // swapped for an upload, and are re-posted as `images` on submit. Drop this
-  // round-trip and every edit would wipe the gallery, since the backend $sets
-  // whatever `images` it receives.
+  // Stored images render as tiles, can be cleared or swapped for an upload,
+  // and are re-posted as `images` on submit.
   // The cap of five applies to uploads only, as it always has.
-  const urlList = imageUrls.split(',').map((url) => url.trim()).filter((url) => url);
-
-  const setUrlList = (next: string[]) => setImageUrls(next.join(', '));
-
   const addImageFile = (file: File) => {
     if (imageFiles.length + 1 > MAX_IMAGES) {
       toast.error('You can upload a maximum of 5 images.');
@@ -368,7 +372,7 @@ export default function ProductForm({
       toast.error('You can upload a maximum of 5 images.');
       return;
     }
-    setUrlList(urlList.filter((_, i) => i !== index));
+    setStoredImages((prev) => prev.filter((_, i) => i !== index));
     setImageFiles((prev) => [...prev, file]);
   };
 
@@ -463,7 +467,7 @@ export default function ProductForm({
     });
 
     // The bad-URL check that used to live here guarded the free-text URL field,
-    // which is gone: nothing can type a link in any more, so `urlList` only ever
+    // which is gone: nothing can type a link in any more, so `storedImages` only ever
     // holds the piece's own stored images. Keeping the check would block saving
     // a legacy record carrying an unloadable URL — with no field left to correct
     // it in, and no visible error, since the message rendered on that field.
@@ -496,6 +500,8 @@ export default function ProductForm({
       // variant on the next save.
       color: v.color?.trim() || '',
       images: v.images || [],
+      // Only when typed: undefined drops out of the JSON, meaning "not tracked".
+      stock: v.stock,
     }));
     formData.append('variants', JSON.stringify(variantsPayload));
 
@@ -531,6 +537,11 @@ export default function ProductForm({
     appendTrimmed('careText', careText);
     appendTrimmed('shippingReturns', shippingReturns);
 
+    formData.append('status', status);
+    formData.append('limited', String(limited));
+    formData.append('showOnLandingPage', String(showOnLandingPage));
+    appendTrimmed('offerText', offerText);
+
     // A half-typed row (label or value blank) is dropped: the schema requires
     // both, so posting one would fail the whole save. An empty array is still
     // sent, so removing every row actually removes the table.
@@ -550,9 +561,8 @@ export default function ProductForm({
 
     formData.append('careIcons', JSON.stringify(careIcons));
 
-    // Convert comma separated images to array
-    const imagesArray = imageUrls.split(',').map((url) => url.trim()).filter((url) => url);
-    imagesArray.forEach((url) => formData.append('images', url));
+    // Raw stored values. None left → no field → the backend saves an empty set.
+    storedImages.forEach((url) => formData.append('images', url));
 
     if (imageFiles.length > 0) {
       imageFiles.forEach((file) => {
@@ -579,7 +589,7 @@ export default function ProductForm({
         toast.error(data.message || 'Failed to save product');
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Error connecting to backend'));
+      toastApiError(err, 'Error connecting to backend');
     } finally {
       setSaving(false);
     }
@@ -598,7 +608,7 @@ export default function ProductForm({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        onClick={onClose}
+        onClick={requestClose}
         className="absolute inset-0 bg-ink/40 backdrop-blur-sm"
       />
 
@@ -625,7 +635,7 @@ export default function ProductForm({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="Close drawer"
             className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full border border-line text-muted hover:text-ink hover:border-ink/30 transition-colors duration-300 ease-editorial"
           >
@@ -1049,13 +1059,13 @@ export default function ProductForm({
                 </div>
 
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                  {urlList.map((url, index) => (
+                  {storedImages.map((url, index) => (
                     <ImagePicker
                       key={`url-${index}-${url}`}
                       url={url}
                       ratio="aspect-square"
                       onSelect={(file) => replaceUrlWithFile(index, file)}
-                      onClear={() => setUrlList(urlList.filter((_, i) => i !== index))}
+                      onClear={() => setStoredImages((prev) => prev.filter((_, i) => i !== index))}
                     />
                   ))}
 
@@ -1075,13 +1085,61 @@ export default function ProductForm({
                 </div>
 
                 <p className="font-sans text-[12px] text-faint mt-2">
-                  JPG, PNG or WEBP up to 5MB each.
+                  JPG, PNG or WEBP up to 15MB each.
                 </p>
               </div>
 
             </Section>
 
             <Section label="Placement">
+              <Field
+                label="Status"
+                htmlFor={`${uid}-status`}
+                hint="Archived pieces stay in order history and old links, but can't be bought."
+              >
+                <Select
+                  id={`${uid}-status`}
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                >
+                  {PRODUCT_STATUSES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field
+                label="Offer Text"
+                htmlFor={`${uid}-offer-text`}
+                optional
+                hint="A short tag on the product card."
+              >
+                <Input
+                  id={`${uid}-offer-text`}
+                  type="text"
+                  placeholder="e.g. Festive Offer"
+                  value={offerText}
+                  onChange={(e) => setOfferText(e.target.value)}
+                />
+              </Field>
+
+              <div className="space-y-3">
+                <Checkbox
+                  label="Limited piece"
+                  description="Adds the LIMITED PIECE tag to the product card."
+                  checked={limited}
+                  onChange={setLimited}
+                />
+                <Checkbox
+                  label="Show on homepage"
+                  description="Includes this piece in the homepage product showcase."
+                  checked={showOnLandingPage}
+                  onChange={setShowOnLandingPage}
+                />
+              </div>
+
               <Field
                 label="Garment Type"
                 htmlFor={`${uid}-garment-type`}
@@ -1177,7 +1235,7 @@ export default function ProductForm({
           </div>
 
           <div className="p-5 sm:p-6 border-t border-line shrink-0 flex items-center justify-end gap-3">
-            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving}>
+            <Button type="button" variant="outline" size="sm" onClick={requestClose} disabled={saving}>
               Cancel
             </Button>
             <Button type="submit" variant="solid" size="sm" loading={saving}>
@@ -1186,6 +1244,20 @@ export default function ProductForm({
           </div>
         </form>
       </motion.aside>
+
+      <ConfirmDialog
+        open={confirmDiscard}
+        onClose={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+        eyebrow="Unsaved changes"
+        title="Discard your changes?"
+        message="This piece has edits that haven't been saved. Closing now will lose them."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+      />
     </div>,
     document.body
   );

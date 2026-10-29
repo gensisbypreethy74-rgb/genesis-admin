@@ -6,7 +6,8 @@ import axios from 'axios';
 import { Eye, EyeOff } from 'lucide-react';
 import { Button, Field, Input, Reveal } from '@/components/ui';
 import Logo from '@/components/ui/Logo';
-import { setAdminSession } from '@/lib/adminSession';
+import { ADMIN_TOKEN_KEY, getAdminUser, setAdminSession } from '@/lib/adminSession';
+import { api } from '@/lib/api';
 
 /**
  * Turn a failed login into something the reader can act on.
@@ -17,8 +18,8 @@ import { setAdminSession } from '@/lib/adminSession';
  */
 function loginErrorMessage(err: unknown): string {
   if (!axios.isAxiosError(err) || !err.response) {
-    // No response at all: DNS, refused connection, CORS, or the URL is wrong
-    // because NEXT_PUBLIC_BACKEND_URL is unset.
+    // No response at all: DNS, refused connection, CORS, or a wrong
+    // NEXT_PUBLIC_BACKEND_URL.
     return 'Could not reach the server. Check that the backend is running.';
   }
 
@@ -43,12 +44,12 @@ export default function AdminLoginPage() {
 
   // Redirect to dashboard if already logged in
   useEffect(() => {
-    const token = localStorage.getItem('adminToken');
+    const token = localStorage.getItem(ADMIN_TOKEN_KEY);
     if (token) {
       // Backfill the session cookie for sessions created before the cookie
-      // existed, so the middleware recognises them instead of looping back here.
-      const user = localStorage.getItem('adminUser');
-      setAdminSession(token, user ? JSON.parse(user) : null);
+      // existed, so proxy.ts recognises them instead of looping back here.
+      // `getAdminUser` guards the parse — a corrupt entry used to throw here.
+      setAdminSession(token, getAdminUser());
       router.push('/dashboard');
     }
   }, [router]);
@@ -57,6 +58,7 @@ export default function AdminLoginPage() {
   // rather than the shared `api` client: that client's 401 interceptor clears
   // the session and redirects here, which on the login page itself would mean a
   // failed sign-in bounces the page instead of showing "invalid credentials".
+  // It still borrows the client's base URL, so both share one fallback.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -79,7 +81,7 @@ export default function AdminLoginPage() {
     setLoading(true);
 
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/v1/auth/login`, { email, password }, { withCredentials: true });
+      const res = await axios.post(`${api.defaults.baseURL}/auth/login`, { email, password }, { withCredentials: true });
       const data = res.data;
 
       if (data.success) {

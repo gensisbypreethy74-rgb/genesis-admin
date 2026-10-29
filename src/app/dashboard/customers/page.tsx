@@ -7,6 +7,7 @@ import { api, toastApiError } from '@/lib/api';
 import { formatINR, formatDate, shortId } from '@/lib/format';
 import {
   Card,
+  ConfirmDialog,
   EmptyState,
   IconButton,
   Modal,
@@ -41,7 +42,15 @@ interface CustomerOrder {
   orderStatus: string;
   paymentMethod: string;
   createdAt: string;
-  items: { quantity: number; price: number; product?: { name?: string } }[];
+  items: {
+    quantity: number;
+    price: number;
+    /** Purchase-time snapshots; legacy orders may lack `name`. */
+    name?: string;
+    size?: string;
+    /** Null once the product has been deleted. */
+    product?: { name?: string } | null;
+  }[];
 }
 
 const PAGE_SIZE = 20;
@@ -57,6 +66,10 @@ export default function CustomersPage() {
 
   // Which row's toggle-status request is currently in flight.
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  // Blocking waits for a confirm; unblocking stays one click. The flag is
+  // separate so the dialog copy survives its exit animation.
+  const [blockTarget, setBlockTarget] = useState<Customer | null>(null);
+  const [blockOpen, setBlockOpen] = useState(false);
 
   // Order-history modal state. `viewingCustomer` outlives `historyOpen` so the
   // modal's exit animation doesn't play against an emptied header.
@@ -93,11 +106,13 @@ export default function CustomersPage() {
     try {
       const res = await api.put(`/users/admin/customers/${id}/toggle-status`, {});
       if (res.data.success) {
-        // Same as before: the row only flips once the server confirms.
+        // The row only flips once the server confirms — and takes the server's
+        // `isActive` rather than inverting what this tab last saw.
+        const isActive = (res.data.data as Partial<Customer> | undefined)?.isActive;
         setCustomers((prev) =>
           prev.map((customer) =>
             customer._id === id
-              ? { ...customer, isActive: !customer.isActive }
+              ? { ...customer, isActive: isActive ?? !customer.isActive }
               : customer
           )
         );
@@ -107,6 +122,15 @@ export default function CustomersPage() {
     } finally {
       setTogglingId(null);
     }
+  };
+
+  const requestToggle = (customer: Customer) => {
+    if (!customer.isActive) {
+      void toggleCustomerStatus(customer._id);
+      return;
+    }
+    setBlockTarget(customer);
+    setBlockOpen(true);
   };
 
   const openOrderHistory = async (customer: Customer) => {
@@ -239,7 +263,7 @@ export default function CustomersPage() {
                             </span>
                             <Toggle
                               checked={customer.isActive}
-                              onChange={() => toggleCustomerStatus(customer._id)}
+                              onChange={() => requestToggle(customer)}
                               disabled={toggling}
                               label={
                                 customer.isActive
@@ -321,7 +345,8 @@ export default function CustomersPage() {
                         className="flex justify-between gap-4 font-sans text-[12px]"
                       >
                         <span className="text-muted min-w-0 truncate">
-                          {item.product?.name || 'Product'} × {item.quantity}
+                          {item.name || item.product?.name || 'Product'}
+                          {item.size ? ` · Size ${item.size}` : ''} × {item.quantity}
                         </span>
                         <span className="text-muted shrink-0 tabular-nums">
                           {formatINR(item.price * item.quantity)}
@@ -335,6 +360,23 @@ export default function CustomersPage() {
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={blockOpen}
+        onClose={() => setBlockOpen(false)}
+        onConfirm={async () => {
+          if (blockTarget) await toggleCustomerStatus(blockTarget._id);
+          setBlockOpen(false);
+        }}
+        title="Block this customer?"
+        message={
+          blockTarget
+            ? `${blockTarget.name || blockTarget.email} will no longer be able to sign in or place orders. You can unblock them at any time.`
+            : ''
+        }
+        confirmLabel="Block"
+        loading={!!blockTarget && togglingId === blockTarget._id}
+      />
     </>
   );
 }

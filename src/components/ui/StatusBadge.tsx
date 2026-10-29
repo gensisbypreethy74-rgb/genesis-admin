@@ -35,17 +35,22 @@ const STATUS_TONES: Record<string, Tone> = {
   delivered: 'success',
   cancelled: 'danger',
   canceled: 'danger',
-  refunded: 'danger',
   // Payment
   paid: 'success',
   completed: 'success',
   failed: 'danger',
+  // Cancelled after the money came in: the studio owes a refund.
+  refund_due: 'danger',
+  refunded: 'neutral',
   // Entity state
   active: 'success',
   inactive: 'neutral',
   draft: 'neutral',
   blocked: 'danger',
   suspended: 'danger',
+  // Product
+  'in stock': 'success',
+  archived: 'neutral',
 };
 
 export function statusTone(status: string): Tone {
@@ -67,7 +72,8 @@ export default function StatusBadge({
     <span
       className={`inline-flex items-center border px-2 py-1 eyebrow-tight whitespace-nowrap ${tones[resolved]} ${className}`}
     >
-      {status}
+      {/* Raw API values like `refund_due` read as "refund due". */}
+      {(status || '').replace(/_/g, ' ')}
     </span>
   );
 }

@@ -26,6 +26,20 @@ export function isUsableImageRef(url?: string | null): boolean {
   return /^https?:\/\/.+/i.test(s);
 }
 
+/**
+ * Cloudinary serves originals of up to 15 MB; a 44px tile only needs a small,
+ * format-negotiated rendition, so ask for one by inserting a transform after
+ * `/upload/`. Anything not on Cloudinary passes through untouched.
+ */
+export function cloudinaryThumb(
+  url: string,
+  transform = 'w_96,h_96,c_fill,f_auto,q_auto'
+): string {
+  return url.startsWith('https://res.cloudinary.com/')
+    ? url.replace('/upload/', `/upload/${transform}/`)
+    : url;
+}
+
 export default function Thumb({
   src,
   alt,
@@ -53,8 +67,12 @@ export default function Thumb({
     .filter((u) => !failed.includes(u as string)) as string[];
 
   const next = candidates[0];
-  // blob: previews from URL.createObjectURL must not be rewritten.
-  const resolved = next?.startsWith('blob:') ? next : assetUrl(next);
+  // blob: previews from URL.createObjectURL must not be rewritten. A square
+  // crop suits the fixed-size tiles; ratio tiles (banner crops) keep their
+  // shape and get a width cap instead.
+  const resolved = next?.startsWith('blob:')
+    ? next
+    : cloudinaryThumb(assetUrl(next), ratio ? 'w_320,c_limit,f_auto,q_auto' : undefined);
   const show = Boolean(resolved);
 
   return (

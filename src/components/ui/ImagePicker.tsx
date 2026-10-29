@@ -1,8 +1,19 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { ImagePlus, X } from 'lucide-react';
 import { assetUrl } from '@/lib/api';
+import { cloudinaryThumb } from './Thumb';
+
+/**
+ * What the backend accepts for every upload field (multer + Cloudinary). Every
+ * file input in the admin is an ImagePicker, so this is the one client check;
+ * the per-page 3 MB / 5 MB limits it replaces disagreed with the server and
+ * with each other.
+ */
+const UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_UPLOAD_MB = 15;
 
 /**
  * Single-image field with preview, drag-and-drop and removal.
@@ -52,11 +63,22 @@ export default function ImagePicker({
     return () => URL.revokeObjectURL(objectUrl);
   }, [objectUrl]);
 
-  const preview = objectUrl ?? (url ? assetUrl(url) : null);
+  // Stored Cloudinary images preview at a capped width rather than as originals.
+  const preview =
+    objectUrl ?? (url ? cloudinaryThumb(assetUrl(url), 'w_800,c_limit,f_auto,q_auto') : null);
 
   const handleFiles = (files: FileList | null) => {
     const picked = files?.[0];
-    if (picked && picked.type.startsWith('image/')) onSelect(picked);
+    if (!picked) return;
+    if (!UPLOAD_TYPES.includes(picked.type)) {
+      toast.error(`“${picked.name}” isn't a JPG, PNG or WEBP image.`);
+      return;
+    }
+    if (picked.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      toast.error(`“${picked.name}” is over ${MAX_UPLOAD_MB} MB. Please use a smaller image.`);
+      return;
+    }
+    onSelect(picked);
   };
 
   return (
@@ -134,7 +156,7 @@ export default function ImagePicker({
         id={id}
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept={UPLOAD_TYPES.join(',')}
         className="sr-only"
         onChange={(e) => {
           handleFiles(e.target.files);

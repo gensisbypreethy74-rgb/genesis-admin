@@ -24,7 +24,13 @@ export default function SettingsPage() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  // Awaited in an async IIFE: the compiler's set-state-in-effect rule can't see
+  // past a bare call to a named async function (same pattern as banners).
+  useEffect(() => {
+    void (async () => {
+      await load();
+    })();
+  }, [load]);
 
   const set = (k: keyof SiteSettings, v: string) => setSettings((p) => (p ? { ...p, [k]: v } : p));
 
@@ -49,7 +55,7 @@ export default function SettingsPage() {
   if (error && !settings) {
     return (
       <div className="py-24 flex flex-col items-center justify-center text-center">
-        <p className="text-red-500 mb-4">Could not load settings. Please try again later.</p>
+        <p className="font-sans text-[13px] text-danger mb-4">Could not load settings. Please try again later.</p>
         <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
       </div>
     );

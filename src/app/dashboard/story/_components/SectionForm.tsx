@@ -14,7 +14,7 @@ import {
   ImagePicker,
   IconButton,
 } from '@/components/ui';
-import { api, apiErrorMessage, assetUrl } from '@/lib/api';
+import { api, toastApiError, assetUrl } from '@/lib/api';
 import {
   IStorySection,
   StorySectionType,
@@ -23,8 +23,6 @@ import {
   FIELDS_BY_TYPE,
   FieldKey,
 } from './types';
-
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 interface Props {
   section: IStorySection | null;
@@ -65,16 +63,13 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
   const fields = FIELDS_BY_TYPE[type];
   const has = (f: FieldKey) => fields.includes(f);
 
+  // Type and size are checked once, in ImagePicker.
   const selectImage = (file: File) => {
-    if (file.size > MAX_FILE_SIZE) return toast.error('Image must be under 5MB');
     setImageFile(file);
     setImage('');
   };
 
-  const addGalleryFile = (file: File) => {
-    if (file.size > MAX_FILE_SIZE) return toast.error('Image must be under 5MB');
-    setGalleryFiles((prev) => [...prev, file]);
-  };
+  const addGalleryFile = (file: File) => setGalleryFiles((prev) => [...prev, file]);
 
   const addTimelineRow = () => setTimeline((prev) => [...prev, { label: '', text: '' }]);
   const updateTimeline = (i: number, key: keyof ITimelineItem, value: string) =>
@@ -138,7 +133,8 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
         toast.error(res.data?.message || 'Could not save section');
       }
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not save section'));
+      // Includes the server's 400s, e.g. "Links must start with / or https://".
+      toastApiError(e, 'Could not save section');
     } finally {
       setSaving(false);
     }
@@ -200,7 +196,7 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
         {has('image') && (
           <ImagePicker
             label="Image"
-            hint="Around 1200×1500 for portraits. Max 5MB."
+            hint="Around 1200×1500 for portraits. JPG, PNG or WEBP, max 15MB."
             ratio="aspect-[4/5]"
             file={imageFile}
             url={image}
@@ -223,7 +219,7 @@ export default function SectionForm({ section, onSaved, onClose }: Props) {
                 <GalleryThumb key={`f-${i}`} src={URL.createObjectURL(f)} onRemove={() => setGalleryFiles((p) => p.filter((_, idx) => idx !== i))} isNew />
               ))}
             </div>
-            <ImagePicker label="Add image" hint="Max 5MB each." ratio="aspect-[4/5]" file={null} url="" onSelect={addGalleryFile} />
+            <ImagePicker label="Add image" hint="JPG, PNG or WEBP, max 15MB each." ratio="aspect-[4/5]" file={null} url="" onSelect={addGalleryFile} />
           </div>
         )}
 

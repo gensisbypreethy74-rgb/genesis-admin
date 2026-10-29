@@ -18,6 +18,7 @@ import {
   ConfirmDialog,
   Field,
   Input,
+  Textarea,
   StatusBadge,
   SkeletonTable,
   EmptyState,
@@ -25,7 +26,7 @@ import {
   ImagePicker,
   IconButton,
 } from '@/components/ui';
-import { api, apiErrorMessage } from '@/lib/api';
+import { api, toastApiError } from '@/lib/api';
 
 interface IBanner {
   _id: string;
@@ -38,9 +39,6 @@ interface IBanner {
   mobileImage?: string;
   status: string;
 }
-
-/** Unchanged from the previous implementation — the backend rejects above this. */
-const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
 
 export default function BannersPage() {
   const [banners, setBanners] = useState<IBanner[]>([]);
@@ -59,6 +57,7 @@ export default function BannersPage() {
   // each pair is live at a time — that distinction drives what goes on the wire.
   const [eyebrow, setEyebrow] = useState('');
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [ctaLabel, setCtaLabel] = useState('');
   const [ctaHref, setCtaHref] = useState('');
   const [image, setImage] = useState('');
@@ -80,7 +79,7 @@ export default function BannersPage() {
         setBanners(data.data);
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Could not load banners.'));
+      toastApiError(err, 'Could not load banners.');
     } finally {
       setLoading(false);
     }
@@ -100,6 +99,7 @@ export default function BannersPage() {
     setEditingId(null);
     setEyebrow('');
     setTitle('');
+    setDescription('');
     setCtaLabel('');
     setCtaHref('');
     setImage('');
@@ -114,6 +114,7 @@ export default function BannersPage() {
     setEditingId(banner._id);
     setEyebrow(banner.eyebrow || '');
     setTitle(banner.title);
+    setDescription(banner.description || '');
     setCtaLabel(banner.ctaLabel || '');
     setCtaHref(banner.ctaHref || '');
     setImage(banner.image);
@@ -133,21 +134,16 @@ export default function BannersPage() {
     setMobileImageFile(null);
   };
 
-  /** Picking a file supersedes any existing path, as it did before. */
+  /**
+   * Picking a file supersedes any existing path, as it did before. Type and
+   * size are checked once, in ImagePicker, against the server's real limit.
+   */
   const selectDesktopImage = (file: File) => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error('Image size must be less than 3MB');
-      return;
-    }
     setImageFile(file);
     setImage('');
   };
 
   const selectMobileImage = (file: File) => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error('Image size must be less than 3MB');
-      return;
-    }
     setMobileImageFile(file);
     setMobileImage('');
   };
@@ -162,21 +158,12 @@ export default function BannersPage() {
       return;
     }
 
-    if (imageFile && imageFile.size > MAX_FILE_SIZE) {
-      toast.error('Laptop image size must be less than 3MB');
-      return;
-    }
-
-    if (mobileImageFile && mobileImageFile.size > MAX_FILE_SIZE) {
-      toast.error('Phone image size must be less than 3MB');
-      return;
-    }
-
     setSaving(true);
 
     const formData = new FormData();
     formData.append('eyebrow', eyebrow);
     formData.append('title', title);
+    formData.append('description', description);
     formData.append('ctaLabel', ctaLabel);
     formData.append('ctaHref', ctaHref);
     formData.append('status', isActive ? 'ACTIVE' : 'INACTIVE');
@@ -211,7 +198,8 @@ export default function BannersPage() {
         toast.error(data.message || 'Failed to save banner');
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Error connecting to backend'));
+      // Includes the server's 400s, e.g. "Links must start with / or https://".
+      toastApiError(err, 'Error connecting to backend');
       // 404 = the banner was removed elsewhere. Retrying the same id can only
       // 404 again, so drop the dead editor and resync rather than stranding
       // the operator on a row that no longer exists.
@@ -242,7 +230,7 @@ export default function BannersPage() {
         toast.error(data.message || 'Failed to delete banner');
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Error deleting banner'));
+      toastApiError(err, 'Error deleting banner');
       // Already gone (404) or the call failed — either way the list is stale.
       setDeleteModal({ isOpen: false, bannerId: null });
       fetchBanners();
@@ -391,6 +379,20 @@ export default function BannersPage() {
                 />
               </Field>
 
+              <Field
+                label="Subheading"
+                htmlFor="banner-description"
+                optional
+                hint="The shorter line under the heading."
+              >
+                <Textarea
+                  id="banner-description"
+                  rows={3}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </Field>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Button text" htmlFor="banner-cta-label" hint="e.g. Explore the Edit">
                   <Input
@@ -416,7 +418,7 @@ export default function BannersPage() {
                   them by viewport, so both are required. */}
               <ImagePicker
                 label="Desktop image"
-                hint="Wide crop, around 1920×1080. Max 3MB."
+                hint="Wide crop, around 1920×1080. JPG, PNG or WEBP, max 15MB."
                 ratio="aspect-[16/9]"
                 file={imageFile}
                 url={image}
@@ -429,7 +431,7 @@ export default function BannersPage() {
 
               <ImagePicker
                 label="Mobile image"
-                hint="Tall crop, around 1080×1350. Max 3MB."
+                hint="Tall crop, around 1080×1350. JPG, PNG or WEBP, max 15MB."
                 ratio="aspect-[4/5]"
                 file={mobileImageFile}
                 url={mobileImage}

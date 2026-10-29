@@ -7,11 +7,7 @@ import {
   Button,
   ButtonLink,
   Card,
-  CardHeader,
   PageHeader,
-  Field,
-  Input,
-  Textarea,
   Toggle,
   StatusBadge,
   ConfirmDialog,
@@ -19,8 +15,8 @@ import {
   IconButton,
   SkeletonTable,
 } from '@/components/ui';
-import { api, apiErrorMessage } from '@/lib/api';
-import { IStorySection, IStorySettings, sectionTypeLabel, sectionSummary } from './_components/types';
+import { api, toastApiError } from '@/lib/api';
+import { IStorySection, sectionTypeLabel, sectionSummary } from './_components/types';
 import SectionForm from './_components/SectionForm';
 
 const STOREFRONT_STORY_URL =
@@ -28,7 +24,6 @@ const STOREFRONT_STORY_URL =
 
 export default function StoryPage() {
   const [sections, setSections] = useState<IStorySection[]>([]);
-  const [settings, setSettings] = useState<IStorySettings>({});
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -38,19 +33,14 @@ export default function StoryPage() {
   const [deleting, setDeleting] = useState(false);
   const [reordering, setReordering] = useState(false);
 
-  // SEO settings removed as per request
-
   const load = useCallback(async () => {
     try {
       const res = await api.get('/story/admin');
       if (res.data?.success) {
-        const data = res.data.data;
-        setSections(data.sections || []);
-        const s: IStorySettings = data.settings || {};
-        setSettings(s);
+        setSections(res.data.data.sections || []);
       }
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not load the Story page.'));
+      toastApiError(e, 'Could not load the Story page.');
     } finally {
       setLoading(false);
     }
@@ -87,7 +77,7 @@ export default function StoryPage() {
     try {
       await api.patch(`/story/sections/${s._id}/toggle`);
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not change status'));
+      toastApiError(e, 'Could not change status');
       load(); // resync on failure
     }
   };
@@ -104,7 +94,7 @@ export default function StoryPage() {
         items: next.map((s, i) => ({ id: s._id, order: i })),
       });
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not reorder'));
+      toastApiError(e, 'Could not reorder');
       load();
     } finally {
       setReordering(false);
@@ -122,13 +112,11 @@ export default function StoryPage() {
         load();
       }
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not delete section'));
+      toastApiError(e, 'Could not delete section');
     } finally {
       setDeleting(false);
     }
   };
-
-  // saveSettings removed
 
   return (
     <div className="pb-4">
@@ -235,7 +223,17 @@ export default function StoryPage() {
         </Card>
 
         {/* Form panel */}
-        {formOpen && <SectionForm section={editing} onSaved={onSaved} onClose={closeForm} />}
+        {/* Keyed so switching sections remounts the form: it seeds its fields
+            from `section` only on mount, so without a key it kept — and saved —
+            the previously opened section's content. */}
+        {formOpen && (
+          <SectionForm
+            key={editing?._id ?? 'new'}
+            section={editing}
+            onSaved={onSaved}
+            onClose={closeForm}
+          />
+        )}
       </div>
 
       <ConfirmDialog

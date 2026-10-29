@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -19,7 +20,8 @@ import {
   X,
   Settings,
 } from 'lucide-react';
-import { clearAdminSession } from '@/lib/adminSession';
+import { ADMIN_TOKEN_KEY, clearAdminSession } from '@/lib/adminSession';
+import { api } from '@/lib/api';
 import Logo from '@/components/ui/Logo';
 import { NAV_ITEMS } from './navigation';
 
@@ -130,9 +132,30 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const reduce = useReducedMotion();
 
   const handleLogout = () => {
+    // Best-effort server sign-out: revokes every token issued to this admin.
+    // Plain fetch rather than `api` so an already-expired token's 401 can't fire
+    // the shared "session expired" toast on top of a deliberate sign-out. Not
+    // awaited: the router navigation below is client-side, so it keeps running.
+    const token = localStorage.getItem(ADMIN_TOKEN_KEY);
+    if (token) {
+      fetch(`${api.defaults.baseURL}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    }
     clearAdminSession();
     router.push('/admin-login');
   };
+
+  // Escape closes the mobile drawer.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   return (
     <>

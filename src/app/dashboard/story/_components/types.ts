@@ -36,15 +36,6 @@ export interface IStorySection {
   status: 'DRAFT' | 'PUBLISHED';
 }
 
-export interface IStorySettings {
-  metaTitle?: string;
-  metaDescription?: string;
-  slug?: string;
-  introEyebrow?: string;
-  introHeading?: string;
-  introDescription?: string;
-}
-
 /** The section kinds the admin can add, with studio-facing labels + guidance. */
 export const SECTION_TYPES: { value: StorySectionType; label: string; hint: string }[] = [
   { value: 'text', label: 'Text + Image', hint: 'Editorial block: eyebrow, headline, copy, image, optional CTA.' },

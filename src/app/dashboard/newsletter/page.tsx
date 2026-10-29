@@ -102,7 +102,7 @@ export default function NewsletterPage() {
   };
 
   /**
-   * Unchanged export: same columns, same quoting, same filename, same
+   * Same columns, same quoting, same filename, same
    * locale-formatted date. Deliberately NOT `formatDate` — that would rewrite
    * the CSV's date column. Always exports the full list, not the current
    * search or page.
@@ -118,9 +118,14 @@ export default function NewsletterPage() {
         new Date(s.createdAt).toLocaleDateString(),
       ]),
     ];
-    const csv = rows
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
+    // `source` comes from the public signup form. A cell starting with = + - @
+    // (or tab / CR) runs as a formula in Excel, so it is prefixed with ' to
+    // force text.
+    const cell = (c: string) => {
+      const s = /^[=+\-@\t\r]/.test(c) ? `'${c}` : c;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const csv = rows.map((r) => r.map((c) => cell(String(c))).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

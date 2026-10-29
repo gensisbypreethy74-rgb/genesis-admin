@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { toast } from 'react-hot-toast';
+import { useState, useEffect, useCallback } from 'react';
 import {
   IndianRupee,
   ShoppingBag,
@@ -13,9 +12,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import { api, apiErrorMessage } from '@/lib/api';
+import { api, toastApiError } from '@/lib/api';
 import { formatINR, formatDate, shortId } from '@/lib/format';
 import {
+  Button,
   ButtonLink,
   Card,
   CardHeader,
@@ -55,23 +55,26 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        // Shared client: baseURL already carries /v1, and the Bearer token plus
-        // 401/403 handling live in the interceptors — not here.
-        const res = await api.get('/dashboard/stats');
-        if (res.data.success) {
-          setStats(res.data.data);
-        }
-      } catch (err) {
-        toast.error(apiErrorMessage(err, 'Could not load dashboard stats.'));
-      } finally {
-        setLoading(false);
+  const fetchStats = useCallback(async () => {
+    try {
+      // Shared client: baseURL already carries /v1, and the Bearer token plus
+      // 401/403 handling live in the interceptors — not here.
+      const res = await api.get('/dashboard/stats');
+      if (res.data.success) {
+        setStats(res.data.data);
       }
-    };
-    fetchStats();
+    } catch (err) {
+      toastApiError(err, 'Could not load dashboard stats.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void (async () => {
+      await fetchStats();
+    })();
+  }, [fetchStats]);
 
   // The same six figures from the same response fields — only the presentation
   // changed. Em-dash rather than a zero when the fetch failed: an unknown
@@ -160,6 +163,26 @@ export default function DashboardPage() {
 
         {loading ? (
           <SkeletonTable rows={5} cols={5} />
+        ) : !stats ? (
+          // The request failed — that is not the same as "no orders yet".
+          <EmptyState
+            eyebrow="Unavailable"
+            title="Could not load transactions"
+            message="The server didn't respond. Try again in a moment."
+            icon={<Receipt size={20} strokeWidth={1.5} aria-hidden />}
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setLoading(true);
+                  void fetchStats();
+                }}
+              >
+                Retry
+              </Button>
+            }
+          />
         ) : recentOrders.length === 0 ? (
           <EmptyState
             title="No transactions yet"

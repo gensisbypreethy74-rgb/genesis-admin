@@ -9,6 +9,8 @@ export interface IVariant {
   color?: string;
   /** Existing image URLs (from the server) — round-tripped in the `variants` JSON. */
   images?: string[];
+  /** Units left in this size. Missing = not tracked (unlimited); 0 = sold out. */
+  stock?: number;
   /** Newly selected uploads, posted as `variantImages_<index>` (client only). */
   _files?: File[];
   // NOTE: the previous `_previews: string[]` field is gone. It held object URLs

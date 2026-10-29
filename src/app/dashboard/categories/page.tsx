@@ -29,7 +29,7 @@ import {
   Thumb,
   Tr,
 } from '@/components/ui';
-import { api, apiErrorMessage, assetUrl } from '@/lib/api';
+import { api, toastApiError } from '@/lib/api';
 
 interface ICategory {
   _id: string;
@@ -66,6 +66,9 @@ export default function CategoriesPage() {
   const [status, setStatus] = useState('ACTIVE');
 
   // THE EDIT: four fixed categories — only their optional descriptions edit.
+  // Both CMS blocks below stay disabled until their GET lands: typing into them
+  // earlier would be overwritten by the late response, and saving after a
+  // failed load would overwrite the real copy with blanks.
   const [editSections, setEditSections] = useState<Record<string, string> | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -73,7 +76,7 @@ export default function CategoriesPage() {
     api
       .get('/edit-sections')
       .then((r) => { if (r.data?.success) setEditSections(r.data.data); })
-      .catch(() => {});
+      .catch((e) => toastApiError(e, 'Could not load THE EDIT descriptions.'));
   }, []);
 
   const saveEditSections = async () => {
@@ -86,7 +89,7 @@ export default function CategoriesPage() {
         toast.success('Descriptions saved');
       }
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not save descriptions.'));
+      toastApiError(e, 'Could not save descriptions.');
     } finally {
       setSavingEdit(false);
     }
@@ -100,7 +103,7 @@ export default function CategoriesPage() {
     api
       .get('/category-section')
       .then((r) => { if (r.data?.success) setCatSection(r.data.data); })
-      .catch(() => {});
+      .catch((e) => toastApiError(e, 'Could not load the category section header.'));
   }, []);
 
   const setCat = (k: string, v: string) =>
@@ -120,7 +123,8 @@ export default function CategoriesPage() {
         toast.success('Category section saved');
       }
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not save the category section.'));
+      // Includes the server's 400s, e.g. "Links must start with / or https://".
+      toastApiError(e, 'Could not save the category section.');
     } finally {
       setSavingCatSection(false);
     }
@@ -134,7 +138,7 @@ export default function CategoriesPage() {
         setCategories(data.data);
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Could not load categories.'));
+      toastApiError(err, 'Could not load categories.');
     } finally {
       setLoading(false);
     }
@@ -157,7 +161,7 @@ export default function CategoriesPage() {
   }, [categories, query]);
 
   // Drives the disabled Add button. The API rejects an over-cap POST regardless,
-  // and `apiErrorMessage` surfaces that message, so this is affordance only.
+  // and `toastApiError` surfaces that message, so this is affordance only.
   const atCap = categories.length >= MAX_CATEGORIES;
 
   const openAddForm = () => {
@@ -177,8 +181,10 @@ export default function CategoriesPage() {
   const handleEdit = (category: ICategory) => {
     setEditingId(category._id);
     setName(category.name);
-    // Same resolution the page did inline; `assetUrl` is the one copy of it.
-    setImage(assetUrl(category.image) || '');
+    // The raw stored value, posted back as-is when no new file is picked.
+    // ImagePicker resolves it for display; posting the resolved URL wrote this
+    // admin's backend origin into the database.
+    setImage(category.image || '');
     setImageFile(null);
     setStatus(category.status);
     setIsAddCategoryOpen(true);
@@ -219,7 +225,7 @@ export default function CategoriesPage() {
         toast.error(data.message || 'Failed to save category');
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Could not save category.'));
+      toastApiError(err, 'Could not save category.');
     } finally {
       setSaving(false);
     }
@@ -243,7 +249,12 @@ export default function CategoriesPage() {
         toast.error(data.message || 'Failed to delete category');
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Could not delete category.'));
+      // 409 = pieces still use it; the server says how many. Retrying can't
+      // help until they're moved, so close the dialog behind the message.
+      toastApiError(err, 'Could not delete category.');
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        setDeleteModal({ isOpen: false, categoryId: null });
+      }
     } finally {
       setDeleting(false);
     }
@@ -272,20 +283,20 @@ export default function CategoriesPage() {
           </p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Field label="Section label" htmlFor="cs-eyebrow" hint="Small uppercase line.">
-              <Input id="cs-eyebrow" value={catSection?.eyebrow ?? ''} onChange={(e) => setCat('eyebrow', e.target.value)} placeholder="The Edit" />
+              <Input id="cs-eyebrow" disabled={!catSection} value={catSection?.eyebrow ?? ''} onChange={(e) => setCat('eyebrow', e.target.value)} placeholder="The Edit" />
             </Field>
             <Field label="Section heading" htmlFor="cs-heading" required>
-              <Input id="cs-heading" value={catSection?.heading ?? ''} onChange={(e) => setCat('heading', e.target.value)} placeholder="Find your way in." />
+              <Input id="cs-heading" disabled={!catSection} value={catSection?.heading ?? ''} onChange={(e) => setCat('heading', e.target.value)} placeholder="Find your way in." />
             </Field>
             <Field label="Button text" htmlFor="cs-shop-label">
-              <Input id="cs-shop-label" value={catSection?.shopLabel ?? ''} onChange={(e) => setCat('shopLabel', e.target.value)} placeholder="Shop All" />
+              <Input id="cs-shop-label" disabled={!catSection} value={catSection?.shopLabel ?? ''} onChange={(e) => setCat('shopLabel', e.target.value)} placeholder="Shop All" />
             </Field>
             <Field label="Button link" htmlFor="cs-shop-href" hint="e.g. /products">
-              <Input id="cs-shop-href" value={catSection?.shopHref ?? ''} onChange={(e) => setCat('shopHref', e.target.value)} placeholder="/products" />
+              <Input id="cs-shop-href" disabled={!catSection} value={catSection?.shopHref ?? ''} onChange={(e) => setCat('shopHref', e.target.value)} placeholder="/products" />
             </Field>
           </div>
           <div className="mt-4">
-            <Button variant="solid" size="sm" onClick={saveCatSection} loading={savingCatSection}>
+            <Button variant="solid" size="sm" onClick={saveCatSection} loading={savingCatSection} disabled={!catSection}>
               Save section
             </Button>
           </div>
@@ -311,6 +322,7 @@ export default function CategoriesPage() {
                 <Textarea
                   id={`es-${c.key}`}
                   rows={3}
+                  disabled={!editSections}
                   value={editSections?.[c.key] ?? ''}
                   onChange={(e) =>
                     setEditSections((p) => ({ ...(p || {}), [c.key]: e.target.value }))
@@ -321,7 +333,7 @@ export default function CategoriesPage() {
             ))}
           </div>
           <div className="mt-4">
-            <Button variant="solid" size="sm" onClick={saveEditSections} loading={savingEdit}>
+            <Button variant="solid" size="sm" onClick={saveEditSections} loading={savingEdit} disabled={!editSections}>
               Save descriptions
             </Button>
           </div>
@@ -435,7 +447,12 @@ export default function CategoriesPage() {
               />
 
               <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-                <Field label="Category Name" htmlFor="category-name" required>
+                <Field
+                  label="Category Name"
+                  htmlFor="category-name"
+                  required
+                  hint={editingId ? 'Renaming also moves every piece in this category to the new name.' : undefined}
+                >
                   <Input
                     id="category-name"
                     value={name}
@@ -454,7 +471,7 @@ export default function CategoriesPage() {
                     setImageFile(null);
                     setImage('');
                   }}
-                  hint="400×400px · JPG, PNG or WEBP"
+                  hint="400×400px · JPG, PNG or WEBP, max 15MB"
                 />
 
                 <div className="border-t border-line pt-5">
@@ -499,7 +516,7 @@ export default function CategoriesPage() {
         onClose={() => setDeleteModal({ isOpen: false, categoryId: null })}
         onConfirm={confirmDelete}
         title="Delete Category?"
-        message="Are you sure you want to delete this category? All associated products may be affected."
+        message="This removes the category from the storefront. A category that pieces are still filed under can't be deleted — move those pieces to another category first."
         confirmLabel="Yes, Delete"
         loading={deleting}
         tone="danger"

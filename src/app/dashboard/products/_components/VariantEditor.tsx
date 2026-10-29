@@ -236,8 +236,6 @@ export default function VariantEditor({
                 />
               </Field>
 
-              {/* Single price. `oldPrice` is zeroed on every edit so no
-                  strikethrough MRP lingers from the old offer/actual split. */}
               <Field
                 label="Price"
                 htmlFor={`${uid}-price-${i}`}
@@ -250,7 +248,48 @@ export default function VariantEditor({
                   placeholder="₹ Price"
                   value={v.price ? v.price : ''}
                   error={!!fieldErrors?.price}
-                  onChange={(e) => patch(i, { price: Number(e.target.value), oldPrice: 0 })}
+                  onChange={(e) => patch(i, { price: Number(e.target.value) })}
+                />
+              </Field>
+
+              {/* Editing the price used to zero this on every keystroke, which
+                  silently wiped the storefront's "was ₹X" strike-through. */}
+              <Field
+                label="Actual Price"
+                htmlFor={`${uid}-old-price-${i}`}
+                optional
+                error={fieldErrors?.oldPrice}
+                hint="Shown struck through when higher than Price."
+              >
+                <Input
+                  id={`${uid}-old-price-${i}`}
+                  type="number"
+                  min="0"
+                  placeholder="₹ MRP"
+                  value={v.oldPrice ? v.oldPrice : ''}
+                  error={!!fieldErrors?.oldPrice}
+                  onChange={(e) => patch(i, { oldPrice: Number(e.target.value) })}
+                />
+              </Field>
+
+              <Field
+                label="Stock"
+                htmlFor={`${uid}-stock-${i}`}
+                optional
+                hint="Blank = not tracked. 0 = sold out."
+              >
+                <Input
+                  id={`${uid}-stock-${i}`}
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  step="1"
+                  placeholder="Not tracked"
+                  value={v.stock ?? ''}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    patch(i, { stock: raw === '' ? undefined : Math.max(0, Math.floor(Number(raw))) });
+                  }}
                 />
               </Field>
             </div>

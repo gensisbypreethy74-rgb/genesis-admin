@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { Button, Card, CardHeader, PageHeader, Field, Input, Textarea, Spinner } from '@/components/ui';
-import { api, apiErrorMessage } from '@/lib/api';
+import { api, toastApiError } from '@/lib/api';
 
 interface StudioNote {
   eyebrow: string; heading: string; description: string; ctaLabel: string; ctaHref: string;
@@ -12,17 +12,25 @@ interface StudioNote {
 export default function StudioNotesPage() {
   const [n, setN] = useState<StudioNote | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const res = await api.get('/studio-note');
       if (res.data?.success) setN(res.data.data);
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not load Studio Notes.'));
+      toastApiError(e, 'Could not load Studio Notes.');
+      setError(true);
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  // Awaited in an async IIFE: the compiler's set-state-in-effect rule can't see
+  // past a bare call to a named async function (same pattern as banners).
+  useEffect(() => {
+    void (async () => {
+      await load();
+    })();
+  }, [load]);
 
   const set = (k: keyof StudioNote, v: string) => setN((p) => (p ? { ...p, [k]: v } : p));
 
@@ -34,11 +42,21 @@ export default function StudioNotesPage() {
       const res = await api.put('/studio-note', n);
       if (res.data?.success) { setN(res.data.data); toast.success('Studio Notes updated'); }
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not save.'));
+      // Includes the server's 400s, e.g. "Links must start with / or https://".
+      toastApiError(e, 'Could not save.');
     } finally {
       setSaving(false);
     }
   };
+
+  if (error && !n) {
+    return (
+      <div className="py-24 flex flex-col items-center justify-center text-center">
+        <p className="font-sans text-[13px] text-danger mb-4">Could not load Studio Notes.</p>
+        <Button variant="outline" size="sm" onClick={() => { setError(false); void load(); }}>Retry</Button>
+      </div>
+    );
+  }
 
   if (!n) return <div className="py-24 flex justify-center"><Spinner /></div>;
 

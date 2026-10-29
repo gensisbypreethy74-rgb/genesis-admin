@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ADMIN_TOKEN_KEY } from '@/lib/adminSession';
+import { ADMIN_TOKEN_KEY, clearAdminSession } from '@/lib/adminSession';
 import Spinner from '@/components/ui/Spinner';
 
 /**
@@ -23,6 +23,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const token = localStorage.getItem(ADMIN_TOKEN_KEY);
     if (!token) {
+      // proxy.ts let us in on the presence cookie alone. Without clearing it,
+      // it would bounce /admin-login straight back here — a redirect loop.
+      clearAdminSession();
       router.push('/admin-login');
       return;
     }

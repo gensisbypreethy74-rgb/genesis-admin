@@ -3,9 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { Button, Card, CardHeader, PageHeader, Field, Input, Textarea, ImagePicker, Spinner } from '@/components/ui';
-import { api, apiErrorMessage } from '@/lib/api';
-
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+import { api, toastApiError } from '@/lib/api';
 
 interface FounderNote {
   eyebrow: string; heading: string; body1: string; body2: string; signature: string; image: string;
@@ -15,22 +13,30 @@ export default function FounderPage() {
   const [n, setN] = useState<FounderNote | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const res = await api.get('/founder-note');
       if (res.data?.success) setN(res.data.data);
     } catch (e) {
-      toast.error(apiErrorMessage(e, "Could not load the Founder's Note."));
+      toastApiError(e, "Could not load the Founder's Note.");
+      setError(true);
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  // Awaited in an async IIFE: the compiler's set-state-in-effect rule can't see
+  // past a bare call to a named async function (same pattern as banners).
+  useEffect(() => {
+    void (async () => {
+      await load();
+    })();
+  }, [load]);
 
   const set = (k: keyof FounderNote, v: string) => setN((p) => (p ? { ...p, [k]: v } : p));
 
+  // Type and size are checked once, in ImagePicker.
   const selectImage = (file: File) => {
-    if (file.size > MAX_FILE_SIZE) return toast.error('Image must be under 5MB');
     setImageFile(file);
     setN((p) => (p ? { ...p, image: '' } : p));
   };
@@ -58,11 +64,20 @@ export default function FounderPage() {
         toast.success("Founder's Note updated");
       }
     } catch (e) {
-      toast.error(apiErrorMessage(e, 'Could not save.'));
+      toastApiError(e, 'Could not save.');
     } finally {
       setSaving(false);
     }
   };
+
+  if (error && !n) {
+    return (
+      <div className="py-24 flex flex-col items-center justify-center text-center">
+        <p className="font-sans text-[13px] text-danger mb-4">Could not load the Founder&apos;s Note.</p>
+        <Button variant="outline" size="sm" onClick={() => { setError(false); void load(); }}>Retry</Button>
+      </div>
+    );
+  }
 
   if (!n) return <div className="py-24 flex justify-center"><Spinner /></div>;
 
@@ -105,7 +120,7 @@ export default function FounderPage() {
           <div className="mt-4">
             <ImagePicker
               label="Founder's Note image"
-              hint="Portrait, around 1000×1250. Max 5MB."
+              hint="Portrait, around 1000×1250. JPG, PNG or WEBP, max 15MB."
               ratio="aspect-[4/5]"
               file={imageFile}
               url={n.image}

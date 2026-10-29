@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
 export default function Home() {
-  // Redirect root to dashboard (middleware handles auth checking)
+  // Redirect root to dashboard (proxy.ts handles auth checking)
   redirect('/dashboard');
 }

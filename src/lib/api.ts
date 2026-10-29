@@ -27,7 +27,7 @@ export const api = axios.create({
 });
 
 // Attach the admin JWT. localStorage stays the source of truth for API auth;
-// the `adminToken=1` cookie exists only so middleware can gate routes.
+// the `adminToken=1` cookie exists only so proxy.ts can gate routes.
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem(ADMIN_TOKEN_KEY);

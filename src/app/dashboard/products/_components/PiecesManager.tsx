@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { Pencil, Shirt, Trash2 } from 'lucide-react';
-import { api, apiErrorMessage } from '@/lib/api';
+import { api, toastApiError } from '@/lib/api';
 import { formatINR } from '@/lib/format';
 import {
   Button,
@@ -34,14 +34,13 @@ const PAGE_SIZE = 20;
  * The full pieces catalogue with add / edit / delete, reusing ProductForm. One
  * component, rendered by both the "Pieces" page and the Moment admin — products
  * are a single global catalogue, so there's one manager, not two copies.
- *
- * `onChanged` lets a host resync any of its own product-derived state (e.g. the
- * Moment page's seasonal picker) after a create/edit/delete here.
  */
-export default function PiecesManager({ onChanged }: { onChanged?: () => void }) {
+export default function PiecesManager() {
   const [products, setProducts] = useState<IProduct[]>([]);
   const [categories, setCategories] = useState<ICategory[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept apart from "empty": an outage must not read as "No pieces yet".
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -55,10 +54,16 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
 
   const fetchProducts = async () => {
     try {
-      const res = await api.get('/products');
-      if (res.data.success) setProducts(res.data.data);
+      // `all=1`: the public list hides Archived pieces, and the studio must
+      // still see them to edit or restore them.
+      const res = await api.get('/products', { params: { all: 1 } });
+      if (res.data.success) {
+        setProducts(res.data.data);
+        setLoadFailed(false);
+      }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Could not load pieces.'));
+      toastApiError(err, 'Could not load pieces.');
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -69,7 +74,7 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
       const res = await api.get('/categories');
       if (res.data.success) setCategories(res.data.data);
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Could not load categories.'));
+      toastApiError(err, 'Could not load categories.');
     }
   };
 
@@ -81,7 +86,6 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
 
   const afterChange = () => {
     fetchProducts();
-    onChanged?.();
   };
 
   const filtered = useMemo(() => {
@@ -125,7 +129,7 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
         toast.error(res.data.message || 'Failed to delete product');
       }
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Error deleting product'));
+      toastApiError(err, 'Error deleting product');
     } finally {
       setDeleting(false);
     }
@@ -154,6 +158,25 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
 
           {loading ? (
             <SkeletonTable rows={6} cols={5} />
+          ) : loadFailed && products.length === 0 ? (
+            <EmptyState
+              eyebrow="Unavailable"
+              title="Could not load pieces"
+              message="The server didn't respond. Nothing has been lost — try again in a moment."
+              icon={<Shirt size={18} />}
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setLoading(true);
+                    fetchProducts();
+                  }}
+                >
+                  Retry
+                </Button>
+              }
+            />
           ) : filtered.length === 0 ? (
             query.trim() ? (
               <EmptyState
@@ -200,7 +223,7 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
                   const secondary = product.garmentType || product.collectionName;
 
                   return (
-                    <Tr key={product._id}>
+                    <Tr key={product._id} muted={product.status === 'Archived'}>
                       <Td>
                         <Thumb
                           src={[
@@ -219,6 +242,10 @@ export default function PiecesManager({ onChanged }: { onChanged?: () => void })
                         <span className="block font-sans text-[12px] text-faint mt-0.5 md:hidden">
                           {product.category}
                         </span>
+                        {/* The Status column is hidden on phones. */}
+                        {product.status === 'Archived' && (
+                          <StatusBadge status="Archived" className="mt-1.5 sm:hidden" />
+                        )}
                       </Td>
 
                       <Td className="hidden md:table-cell">

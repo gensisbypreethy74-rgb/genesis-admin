@@ -1,10 +1,12 @@
 // Admin session helpers.
 //
 // The admin JWT lives in localStorage (used to authorize API calls). We ALSO
-// mirror a lightweight presence cookie so Next.js `middleware.ts` — which runs
-// on the server and cannot read localStorage — can gate the `/dashboard` routes
+// mirror a lightweight presence cookie so Next.js `proxy.ts` — which runs on
+// the server and cannot read localStorage — can gate the `/dashboard` routes
 // before any client JS loads. The cookie is not the source of truth for API
 // auth (that stays the Bearer token); it only signals "an admin is logged in".
+// It is a UX redirect, not a security boundary: every API call is authorised
+// by the backend.
 
 export const ADMIN_TOKEN_KEY = 'adminToken';
 export const ADMIN_USER_KEY = 'adminUser';
@@ -14,10 +16,10 @@ export const ADMIN_COOKIE = 'adminToken';
 export function setAdminSession(token: string, user: unknown) {
   localStorage.setItem(ADMIN_TOKEN_KEY, token);
   localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(user));
-  // 7-day cookie, matching the backend JWT lifetime. `SameSite=Lax` so top-level
-  // navigations to /dashboard carry it; `Secure` only when served over HTTPS.
+  // 12-hour cookie, matching the backend's admin JWT lifetime. `SameSite=Lax`
+  // so top-level navigations to /dashboard carry it; `Secure` only over HTTPS.
   const secure = typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : '';
-  document.cookie = `${ADMIN_COOKIE}=1; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax${secure}`;
+  document.cookie = `${ADMIN_COOKIE}=1; Path=/; Max-Age=${60 * 60 * 12}; SameSite=Lax${secure}`;
 }
 
 export interface AdminUser {
@@ -54,16 +56,6 @@ export function getAdminUser(): AdminUser | null {
 
 /** Server render has no localStorage; nothing is signed in there. */
 export function getAdminUserServerSnapshot(): AdminUser | null {
-  return null;
-}
-
-/** The raw JWT, or null. A string, so it's already identity-stable. */
-export function getAdminToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(ADMIN_TOKEN_KEY);
-}
-
-export function getAdminTokenServerSnapshot(): string | null {
   return null;
 }
 
