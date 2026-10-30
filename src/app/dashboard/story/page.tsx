@@ -16,11 +16,11 @@ import {
   SkeletonTable,
 } from '@/components/ui';
 import { api, toastApiError } from '@/lib/api';
+import { STOREFRONT_URL } from '@/lib/storefront';
 import { IStorySection, sectionTypeLabel, sectionSummary } from './_components/types';
 import SectionForm from './_components/SectionForm';
 
-const STOREFRONT_STORY_URL =
-  (process.env.NEXT_PUBLIC_STOREFRONT_URL || 'http://localhost:3000') + '/story';
+const STOREFRONT_STORY_URL = `${STOREFRONT_URL}/story`;
 
 export default function StoryPage() {
   const [sections, setSections] = useState<IStorySection[]>([]);

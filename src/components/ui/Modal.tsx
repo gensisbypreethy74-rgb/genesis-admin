@@ -92,7 +92,7 @@ export function useDialogBehaviour(
 
     openDialogs.push(panel);
     // Setting `body { overflow: hidden }` alone is a no-op inside the dashboard:
-    // that shell is `h-screen overflow-hidden` and the real scroller is <main>.
+    // that shell is `h-dvh overflow-hidden` and the real scroller is <main>.
     // The class lets globals.css freeze whichever element is marked as the
     // scroll container.
     document.documentElement.classList.add('modal-open');

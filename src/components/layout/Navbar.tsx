@@ -9,13 +9,11 @@ import {
   subscribeToAdminUser,
 } from '@/lib/adminSession';
 import { navItemForPath } from './navigation';
+import { STOREFRONT_URL } from '@/lib/storefront';
 
 interface NavbarProps {
   onMenuClick: () => void;
 }
-
-const STOREFRONT_URL =
-  process.env.NEXT_PUBLIC_STOREFRONT_URL || 'https://genesisbypreethy.com';
 
 /**
  * Slim top bar. The page title now lives in each page's PageHeader, so this

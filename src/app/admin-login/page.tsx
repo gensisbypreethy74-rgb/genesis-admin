@@ -58,7 +58,7 @@ export default function AdminLoginPage() {
   // rather than the shared `api` client: that client's 401 interceptor clears
   // the session and redirects here, which on the login page itself would mean a
   // failed sign-in bounces the page instead of showing "invalid credentials".
-  // It still borrows the client's base URL, so both share one fallback.
+  // It still borrows the client's base URL, so both use the one configured backend.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 

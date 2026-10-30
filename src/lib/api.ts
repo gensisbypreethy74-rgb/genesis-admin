@@ -11,19 +11,23 @@ import { clearAdminSession, ADMIN_TOKEN_KEY } from '@/lib/adminSession';
 // unchanged — this only centralizes how requests are built and how auth
 // failures are surfaced.
 
-/** Origin of the backend, e.g. http://localhost:5000/api */
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000/api';
-
 /**
- * Server origin without the `/api` suffix — uploaded images are served from the
- * origin root (`/uploads/...`), not from under `/api`. Every page used to
- * rebuild this string inline.
+ * Server origin, e.g. http://localhost:5000. NEXT_PUBLIC_BACKEND_URL may be
+ * given with or without a trailing "/api" or "/api/v1" (and trailing slashes);
+ * all forms resolve to the same origin. Uploaded images are served from the
+ * origin root (`/uploads/...`), not from under `/api`. There is deliberately no
+ * default: `next.config.ts` refuses to start or build without a valid value.
  */
-const ASSET_ORIGIN = BACKEND_URL.replace(/\/api\/?$/, '') || 'http://localhost:5000';
+const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+if (!RAW_BACKEND_URL) throw new Error('NEXT_PUBLIC_BACKEND_URL is not set.');
+
+const ASSET_ORIGIN = RAW_BACKEND_URL
+  .trim()
+  .replace(/\/+$/, '')
+  .replace(/\/api(\/v1)?$/, '');
 
 export const api = axios.create({
-  baseURL: `${BACKEND_URL}/v1`,
+  baseURL: `${ASSET_ORIGIN}/api/v1`,
 });
 
 // Attach the admin JWT. localStorage stays the source of truth for API auth;
@@ -100,6 +104,11 @@ export function toastApiError(error: unknown, fallback: string): void {
  */
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
+    // No response at all: the API was unreachable (on Render's free plan, usually
+    // waking up or restarting after a deploy). axios only says "Network Error".
+    if (!error.response && error.code !== 'ERR_CANCELED') {
+      return "Can't reach the server. It may be starting up. Please try again in a minute.";
+    }
     return (
       (error.response?.data as { message?: string } | undefined)?.message ||
       error.message ||
